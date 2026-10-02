@@ -25,7 +25,6 @@ LOG_TIMESTAMP = re.compile(
     r"^\ufeff?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s"
 )
 DEPENDABOT_BRANCH = re.compile(r"^dependabot/[A-Za-z0-9._/-]+$")
-REBASE_MARKER_PREFIX = "<!-- dependency-rebase-request:v1:"
 TERMINAL_NONBLOCKING_CONCLUSIONS = {"success", "skipped"}
 
 TRANSIENT_SIGNATURES: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -503,20 +502,6 @@ def _rerun_failed_jobs(api: GitHubApi, run_id: int) -> str:
         raise
 
 
-def request_dependabot_rebase(api: GitHubApi, number: int, base_sha: str) -> str:
-    safe_number = parse_positive_integer(number, "pull request number")
-    if not re.fullmatch(r"[0-9a-f]{40}", base_sha):
-        raise GovernanceError("rebase request base SHA is not canonical")
-    marker = f"{REBASE_MARKER_PREFIX}{base_sha} -->"
-    comments = api.paginate(f"/issues/{safe_number}/comments")
-    if any(marker in str(comment.get("body") or "") for comment in comments):
-        return "already-requested"
-    api.post(
-        f"/issues/{safe_number}/comments",
-        {"body": f"@dependabot rebase\n\n{marker}"},
-    )
-    return "requested"
-
 
 def recover_pull(
     api: GitHubApi,
@@ -548,19 +533,16 @@ def recover_pull(
         return {"pr": safe_number, "skipped": True, "reason": "recovery kill switch is disabled", "scope": scope}
     if not scope["eligible"]:
         stale_only = provenance.get("reasons") == ["Dependabot commit parent is not the current main SHA"]
-        rebase_state: str | None = None
-        if stale_only and allow_rerun:
-            rebase_state = request_dependabot_rebase(api, safe_number, base_sha)
         return {
             "pr": safe_number,
             "skipped": True,
             "reason": (
-                f"Dependabot native rebase {rebase_state or 'deferred'} for current main"
+                "stale exact head; dependency governance owns the owner-authenticated native rebase request"
                 if stale_only
                 else "recovery scope is not eligible"
             ),
             "scope": scope,
-            "rebase": rebase_state,
+            "rebase": "delegated-to-governance" if stale_only else None,
         }
 
     failures = [

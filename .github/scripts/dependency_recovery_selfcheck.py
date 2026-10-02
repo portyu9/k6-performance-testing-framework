@@ -288,19 +288,15 @@ class RecoverySelfCheck(unittest.TestCase):
         self.assertEqual(result["actions"][0]["state"], "rerun-requested")
         self.assertEqual(result["scope"]["ecosystem"], "github-actions")
 
-    def test_stale_base_requests_one_native_rebase_per_main_sha(self) -> None:
+    def test_stale_base_delegates_native_rebase_to_governance_owner_identity(self) -> None:
         fixture = canonical_fixture()
         fixture["commit"]["parents"] = [{"sha": "c" * 40}]
         api = FakeApi(fixture, [job(), gate()])
-        first = recover_pull(api, fixture["pull"]["number"], GOVERNANCE, RECOVERY, True, log_loader=lambda _api, _job_id: logs(failed="EAI_AGAIN"))
-        second = recover_pull(api, fixture["pull"]["number"], GOVERNANCE, RECOVERY, True, log_loader=lambda _api, _job_id: logs(failed="EAI_AGAIN"))
+        result = recover_pull(api, fixture["pull"]["number"], GOVERNANCE, RECOVERY, True, log_loader=lambda _api, _job_id: logs(failed="EAI_AGAIN"))
         self.assertEqual(api.reruns, [])
-        self.assertTrue(first["skipped"])
-        self.assertEqual(first["rebase"], "requested")
-        self.assertEqual(second["rebase"], "already-requested")
-        self.assertEqual(len(api.comments), 1)
-        self.assertIn("@dependabot rebase", api.comments[0]["body"])
-        self.assertIn(fixture["base_sha"], api.comments[0]["body"])
+        self.assertTrue(result["skipped"])
+        self.assertEqual(result["rebase"], "delegated-to-governance")
+        self.assertEqual(api.comments, [])
 
     def test_workflow_run_resolution_accepts_only_dependabot_branch(self) -> None:
         fixture = canonical_fixture()
@@ -334,7 +330,9 @@ class RecoverySelfCheck(unittest.TestCase):
         self.assertLess(workflow.index("Attempt bounded dependency recovery"), workflow.index("Reconcile dependency governance"))
         recovery_text = (SCRIPT_DIR / "dependency_recovery.py").read_text(encoding="utf-8")
         self.assertNotIn("update-branch", recovery_text)
-        self.assertIn("@dependabot rebase", recovery_text)
+        self.assertNotIn("@dependabot rebase", recovery_text)
+        reconcile_text = (SCRIPT_DIR / "dependency_governance_lib" / "reconcile.py").read_text(encoding="utf-8")
+        self.assertIn("@dependabot {command}", reconcile_text)
 
 
 if __name__ == "__main__":

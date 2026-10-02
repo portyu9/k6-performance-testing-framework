@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any
 
 import dependency_governance as gov
+from dependency_governance_lib.models import Assessment, GovernanceError
 from dependency_governance_lib.qualification import validate_qualification
+from dependency_governance_lib.reconcile import (
+    ensure_owner_review_and_approval,
+    has_exact_owner_approval,
+    request_dependabot_refresh,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = json.loads((ROOT / '.github/dependency-governance.json').read_text(encoding='utf-8'))
@@ -71,6 +77,63 @@ class FakeApi:
         raise AssertionError(path)
 
 
+
+class OwnerApi:
+    def __init__(self, login: str = 'portyu9', user_id: int = 35150859):
+        self.identity = {'login': login, 'id': user_id}
+        self.comments: list[dict[str, Any]] = []
+        self.reviews: list[dict[str, Any]] = []
+
+    def get(self, path: str) -> dict[str, Any]:
+        if path == 'https://api.github.com/user':
+            return self.identity
+        raise AssertionError(path)
+
+    def paginate(self, path: str, selector: str | None = None) -> list[dict[str, Any]]:
+        if path.endswith('/comments'):
+            return self.comments
+        if path.endswith('/reviews'):
+            return self.reviews
+        raise AssertionError(path)
+
+    def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        user = dict(self.identity)
+        if path.endswith('/comments'):
+            item = {'id': len(self.comments) + 1, 'body': payload['body'], 'user': user}
+            self.comments.append(item)
+            return item
+        if path.endswith('/reviews'):
+            item = {
+                'id': len(self.reviews) + 1,
+                'body': payload['body'],
+                'user': user,
+                'state': 'APPROVED',
+                'commit_id': payload['commit_id'],
+            }
+            self.reviews.append(item)
+            return item
+        raise AssertionError(path)
+
+
+def owner_assessment(*, head: str = HEAD, stale: bool = False) -> Assessment:
+    return Assessment(
+        pull={'number': 17},
+        base_sha=BASE,
+        head_sha=head,
+        files=[],
+        commits=[],
+        ecosystem='github-actions',
+        provenance={
+            'eligible': not stale,
+            'reasons': ['Dependabot commit parent is not the current main SHA'] if stale else [],
+            'provenanceState': 'canonical-dependabot',
+        },
+        metadata=[],
+        semantic={'eligible': not stale, 'reasons': [], 'changes': []},
+        qualification={'eligible': not stale, 'reasons': [], 'runs': []},
+    )
+
+
 def action_patch(version: str = '7.0.1', extra: str = '') -> str:
     return (
         '@@ -1 +1 @@\n'
@@ -127,6 +190,10 @@ def check_config() -> None:
     assert any('unique' in reason for reason in gov.validate_config(broken))
     broken = deepcopy(CONFIG); broken['ecosystems']['docker']['mode'] = 'manual'
     assert any('qualified autonomous' in reason for reason in gov.validate_config(broken))
+    broken = deepcopy(CONFIG); broken['ownerApprovalRequired'] = False
+    assert any('ownerApprovalRequired' in reason for reason in gov.validate_config(broken))
+    broken = deepcopy(CONFIG); broken['ownerApprovalUserId'] = 0
+    assert any('ownerApprovalUserId' in reason for reason in gov.validate_config(broken))
 
 def check_parsers() -> None:
     assert gov.parse_positive_integer('42', 'pr') == 42 and gov.parse_bool('true') and not gov.parse_bool('false')
@@ -213,9 +280,94 @@ def check_go_refusal() -> None:
     assert not result['eligible']
     assert any('indirect Go module metadata' in reason for reason in result['reasons'])
 
+def check_owner_identity_review_and_refresh() -> None:
+    good = OwnerApi(CONFIG['ownerApprovalLogin'], CONFIG['ownerApprovalUserId'])
+    assessment = owner_assessment()
+    ensure_owner_review_and_approval(good, assessment, CONFIG)
+    assert len(good.comments) == 1
+    assert len(good.reviews) == 1
+    assert has_exact_owner_approval(good, 17, HEAD, CONFIG)
+
+    # Reconciliation is idempotent for the same exact head.
+    ensure_owner_review_and_approval(good, assessment, CONFIG)
+    assert len(good.comments) == 1
+    assert len(good.reviews) == 1
+
+    # A stale owner approval cannot satisfy the current exact head.
+    stale_review = OwnerApi(CONFIG['ownerApprovalLogin'], CONFIG['ownerApprovalUserId'])
+    stale_review.reviews.append({
+        'state': 'APPROVED',
+        'commit_id': OLD,
+        'user': {'login': CONFIG['ownerApprovalLogin'], 'id': CONFIG['ownerApprovalUserId']},
+        'body': 'old approval',
+    })
+    ensure_owner_review_and_approval(stale_review, assessment, CONFIG)
+    assert len(stale_review.reviews) == 2
+    assert has_exact_owner_approval(stale_review, 17, HEAD, CONFIG)
+
+    # Wrong or absent identities fail closed.
+    for owner in (None, OwnerApi('github-actions[bot]', 41898282)):
+        try:
+            ensure_owner_review_and_approval(owner, assessment, CONFIG)
+        except GovernanceError:
+            pass
+        else:
+            raise AssertionError('untrusted owner identity was accepted')
+
+    # A bot-authored legacy marker must not suppress the push-capable owner command.
+    refresh_api = OwnerApi(CONFIG['ownerApprovalLogin'], CONFIG['ownerApprovalUserId'])
+    refresh_api.comments.append({
+        'id': 1,
+        'body': f'@dependabot rebase\n<!-- dependency-owner-refresh:v2:{HEAD}:rebase -->',
+        'user': {'login': 'github-actions[bot]', 'id': 41898282},
+    })
+    command = request_dependabot_refresh(refresh_api, 17, owner_assessment(stale=True), CONFIG)
+    assert command == 'rebase'
+    assert len(refresh_api.comments) == 2
+    assert refresh_api.comments[-1]['user']['login'] == CONFIG['ownerApprovalLogin']
+    assert '@dependabot rebase' in refresh_api.comments[-1]['body']
+
+
 def check_action_patch() -> None:
     result=gov.validate_actions([{'filename':'.github/workflows/ci.yml','patch':action_patch()}], [{'name':'actions/checkout','version':'7.0.1','updateType':'version-update:semver-patch'}], CONFIG)
     assert result['eligible'], result['reasons']
+
+    # Reproduce the grouped CodeQL subpath shape from live Dependabot PR #61.
+    codeql_patch = (
+        '@@ -1 +1 @@\n'
+        f'-        uses: github/codeql-action/init@{OLD} # v4.38.0\n'
+        f'-        uses: github/codeql-action/analyze@{OLD} # v4.38.0\n'
+        f'+        uses: github/codeql-action/init@{NEW} # v4.38.2\n'
+        f'+        uses: github/codeql-action/analyze@{NEW} # v4.38.2\n'
+    )
+    codeql = gov.validate_actions(
+        [{'filename':'.github/workflows/security.yml','patch':codeql_patch}],
+        [
+            {'name':'github/codeql-action/init','version':'4.38.1','updateType':'version-update:semver-patch'},
+            {'name':'github/codeql-action/analyze','version':'4.38.1','updateType':'version-update:semver-patch'},
+        ],
+        CONFIG,
+    )
+    assert codeql['eligible'], codeql['reasons']
+    assert {change['action'] for change in codeql['changes']} == {
+        'github/codeql-action/init',
+        'github/codeql-action/analyze',
+    }
+    assert all(change['signedVersion'] == '4.38.1' for change in codeql['changes'])
+    assert all(change['metadataLagAccepted'] is True for change in codeql['changes'])
+
+    # Metadata lag is bounded: a minor/major escape or backwards annotation remains blocked.
+    escaped_patch = (
+        '@@ -1 +1 @@\n'
+        f'-        uses: github/codeql-action/init@{OLD} # v4.38.0\n'
+        f'+        uses: github/codeql-action/init@{NEW} # v4.39.0\n'
+    )
+    escaped = gov.validate_actions(
+        [{'filename':'.github/workflows/security.yml','patch':escaped_patch}],
+        [{'name':'github/codeql-action/init','version':'4.38.1','updateType':'version-update:semver-patch'}],
+        CONFIG,
+    )
+    assert not escaped['eligible']
 
 
 def check_action_refusal() -> None:
@@ -285,19 +437,22 @@ def check_targets() -> None:
 def check_workflow_boundary() -> None:
     assert 'ref: ${{ github.event.repository.default_branch }}' in WORKFLOW
     assert 'persist-credentials: false' in WORKFLOW
-    assert "github.event_name == 'pull_request' && 'self-test' || 'reconcile'" in WORKFLOW
     assert "if: github.event_name != 'pull_request'" in WORKFLOW
     assert 'pull_request_target:' in WORKFLOW and 'workflow_run:' in WORKFLOW
     assert "- '.github/scripts/dependency_governance_lib/**'" in WORKFLOW
     assert "- '.github/scripts/dependency_repair.py'" in WORKFLOW
     assert "cron: '17 * * * *'" in WORKFLOW
     assert 'Apply deterministic dependency repair' in WORKFLOW
+    owner_secret = 'DEPENDABOT_OWNER_TOKEN: ${{ secrets.DEPENDABOT_OWNER_TOKEN }}'
+    assert WORKFLOW.count(owner_secret) == 1
+    assert WORKFLOW.index(owner_secret) > WORKFLOW.index('Reconcile dependency governance')
+    assert "group: dependency-governance-${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || 'reconcile' }}" in WORKFLOW
 
 
 CHECKS=[
     check_config,check_parsers,check_metadata,check_classification,check_provenance,
     check_spoofing,check_go_patch,check_grpc_security_patch,check_go_refusal,
-    check_action_patch,check_action_refusal,check_docker_semantics,check_run_identity,check_qualification,
+    check_owner_identity_review_and_refresh,check_action_patch,check_action_refusal,check_docker_semantics,check_run_identity,check_qualification,
     check_targets,check_workflow_boundary,
 ]
 if __name__ == '__main__':

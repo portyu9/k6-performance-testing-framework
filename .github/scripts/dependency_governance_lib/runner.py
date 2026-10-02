@@ -74,6 +74,12 @@ def run_governance(config: dict[str, Any]) -> int:
         repository,
         config["maxPaginationPages"],
     )
+    owner_token = os.environ.get("DEPENDABOT_OWNER_TOKEN", "").strip()
+    owner_api = (
+        GitHubApi(owner_token, repository, config["maxPaginationPages"])
+        if owner_token
+        else None
+    )
     event_name = os.environ.get("GITHUB_EVENT_NAME", "").strip()
     if not event_name:
         raise GovernanceError("GITHUB_EVENT_NAME is required")
@@ -90,7 +96,7 @@ def run_governance(config: dict[str, Any]) -> int:
     for text in targets:
         number = int(text)
         try:
-            results.append(reconcile_one(api, number, config, allow_merge))
+            results.append(reconcile_one(api, owner_api, number, config, allow_merge))
         except GovernanceError as exc:
             message = f"PR #{number}: operational failure: {exc}"
             results.append(message)

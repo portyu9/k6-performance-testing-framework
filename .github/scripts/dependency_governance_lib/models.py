@@ -15,7 +15,7 @@ POSITIVE_INT = re.compile(r"^[1-9]\d*$")
 SEMVER = re.compile(r"^v?(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)$")
 ACTION_LINE = re.compile(
     r"^(?P<prefix>\s*(?:-\s+)?uses:\s+)"
-    r"(?P<action>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)"
+    r"(?P<action>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)"
     r"@(?P<ref>[0-9a-fA-F]{40})"
     r"(?P<suffix>\s+#\s+v(?P<version>\d+(?:\.\d+){0,2})\s*)$"
 )
@@ -129,6 +129,12 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         errors.append("mergeMethod is invalid")
     if not isinstance(config.get("automergeEnabled"), bool):
         errors.append("automergeEnabled must be boolean")
+    if config.get("ownerApprovalRequired") is not True:
+        errors.append("ownerApprovalRequired must remain true")
+    if not nonempty(config.get("ownerApprovalLogin")):
+        errors.append("ownerApprovalLogin must be non-empty")
+    if not isinstance(config.get("ownerApprovalUserId"), int) or config.get("ownerApprovalUserId", 0) <= 0:
+        errors.append("ownerApprovalUserId must be a positive integer")
     if config.get("statusCommentMarker") != "<!-- dependency-governance:v1 -->":
         errors.append("statusCommentMarker must equal the v1 governance marker")
 
