@@ -182,13 +182,13 @@ For runtime variables, workload models, metrics/threshold semantics, evidence in
 
 ## Packaged runtime provenance
 
-[`docker/Dockerfile`](docker/Dockerfile) is the single tracked runtime source. The executing k6 binary is rebuilt from reviewed source identity and the governed security overrides `golang.org/x/crypto v0.57.0` and `google.golang.org/grpc v1.83.2`.
+[`docker/Dockerfile`](docker/Dockerfile) is the single tracked runtime source. The executing k6 binary is rebuilt from reviewed source identity and the governed security override modules `golang.org/x/crypto` and `google.golang.org/grpc`; their mutable versions live only in `docker/security-overrides/go.mod`, so Dependabot can update them without creating stale documentation.
 
 The final runtime is pinned to Alpine 3.24.2 by digest and performs no package-repository mutation: **final-stage package installation is forbidden**, and broad `apk update` / `apk upgrade` operations are forbidden. The statically built k6 binary uses the CA trust bundle copied from the digest-pinned builder, and the image runs as numeric non-root user `12345`.
 
 The built image is **not claimed to be bit-for-bit reproducible from the Git commit alone** because external source/package retrieval and build-tool behavior remain inputs. Built-image Trivy evidence attests the OS and Go-binary package state actually produced by the governed build.
 
-Runtime-marker updates are release signals rather than automatic binary switches: reviewed source/version provenance must remain synchronized and pass runtime, smoke, extended, and security qualification.
+Runtime-marker updates are eligible for autonomous qualification only after the trusted dependency controller synchronizes explicit source version/commit provenance and the repaired exact head passes runtime, smoke, extended, security, and docs gates.
 
 ## Stable CI conclusions
 
