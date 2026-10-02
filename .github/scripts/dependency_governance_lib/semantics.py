@@ -272,12 +272,25 @@ def validate_actions(
         if item.get("updateType") not in config["allowedActionUpdateTypes"]:
             reasons.append(f"{action} update type {item.get('updateType') or 'unknown'} is not autonomous")
         signed_version = normalize_version(item.get("version", ""))
-        if versions and signed_version not in versions:
-            reasons.append(f"{action} signed dependency-version does not match the workflow annotation")
-        version = semver_tuple(signed_version)
-        if not version:
+        signed_tuple = semver_tuple(signed_version)
+        annotated_version = next(iter(versions)) if len(versions) == 1 else ""
+        annotated_tuple = semver_tuple(annotated_version) if annotated_version else None
+        update_type = str(item.get("updateType") or "")
+        if annotated_version and signed_version != annotated_version:
+            metadata_lag_ok = False
+            if signed_tuple and annotated_tuple and annotated_tuple >= signed_tuple:
+                if "semver-patch" in update_type:
+                    metadata_lag_ok = annotated_tuple[:2] == signed_tuple[:2]
+                elif "semver-minor" in update_type:
+                    metadata_lag_ok = annotated_tuple[0] == signed_tuple[0]
+            if not metadata_lag_ok:
+                reasons.append(
+                    f"{action} signed dependency-version does not match the workflow annotation "
+                    "within the declared update envelope"
+                )
+        if not signed_tuple:
             reasons.append(f"{action} signed version is not strict semantic version metadata")
-        elif version[0] == 0 and "minor" in str(item.get("updateType", "")):
+        elif signed_tuple[0] == 0 and "minor" in update_type:
             reasons.append(f"{action} 0.x minor updates remain manual breaking-risk changes")
 
     return {"eligible": not reasons, "reasons": unique(reasons), "changes": changes}
