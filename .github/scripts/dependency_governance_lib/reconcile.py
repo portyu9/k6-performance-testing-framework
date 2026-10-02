@@ -7,6 +7,101 @@ from .github import GitHubApi
 from .models import Assessment, GovernanceError
 from .qualification import fetch_assessment
 
+OWNER_REVIEW_MARKER = "<!-- dependency-owner-review:v1:"
+OWNER_APPROVAL_MARKER = "<!-- dependency-owner-approval:v1:"
+OWNER_REFRESH_MARKER = "<!-- dependency-owner-refresh:v2:"
+
+
+def verify_owner_identity(owner_api: GitHubApi | None, config: dict[str, Any]) -> dict[str, Any]:
+    if owner_api is None:
+        raise GovernanceError(
+            "DEPENDABOT_OWNER_TOKEN is required for owner-authenticated Dependabot refresh, review, and approval"
+        )
+    identity = owner_api.get("https://api.github.com/user")
+    if not isinstance(identity, dict):
+        raise GovernanceError("owner token identity response is invalid")
+    if (
+        identity.get("login") != config["ownerApprovalLogin"]
+        or identity.get("id") != config["ownerApprovalUserId"]
+    ):
+        raise GovernanceError(
+            "DEPENDABOT_OWNER_TOKEN does not authenticate the configured repository owner identity"
+        )
+    return identity
+
+
+def has_exact_owner_approval(
+    owner_api: GitHubApi,
+    number: int,
+    head_sha: str,
+    config: dict[str, Any],
+) -> bool:
+    reviews = owner_api.paginate(f"/pulls/{number}/reviews")
+    return any(
+        review.get("state") == "APPROVED"
+        and review.get("commit_id") == head_sha
+        and (review.get("user") or {}).get("login") == config["ownerApprovalLogin"]
+        and (review.get("user") or {}).get("id") == config["ownerApprovalUserId"]
+        for review in reviews
+    )
+
+
+def ensure_owner_review_and_approval(
+    owner_api: GitHubApi | None,
+    assessment: Assessment,
+    config: dict[str, Any],
+) -> None:
+    verify_owner_identity(owner_api, config)
+    assert owner_api is not None
+    number = int(assessment.pull["number"])
+    head_sha = assessment.head_sha
+
+    comment_marker = f"{OWNER_REVIEW_MARKER}{head_sha} -->"
+    comments = owner_api.paginate(f"/issues/{number}/comments")
+    owner_comments = [
+        comment
+        for comment in comments
+        if comment_marker in str(comment.get("body") or "")
+        and (comment.get("user") or {}).get("login") == config["ownerApprovalLogin"]
+        and (comment.get("user") or {}).get("id") == config["ownerApprovalUserId"]
+    ]
+    if len(owner_comments) > 1:
+        raise GovernanceError(f"PR #{number} has duplicate exact-head owner review comments")
+    if not owner_comments:
+        owner_api.post(
+            f"/issues/{number}/comments",
+            {
+                "body": (
+                    f"{comment_marker}\n"
+                    "## Owner-authenticated Dependabot review\n\n"
+                    f"- Exact head: `{head_sha}`\n"
+                    "- Canonical Dependabot provenance: **pass**\n"
+                    "- Semantic dependency scope: **pass**\n"
+                    "- Exact-head CI / Extended / Security / Docs qualification: **pass**\n"
+                    "- Action: approve this exact head, revalidate it, then merge only if it remains unchanged and qualified.\n"
+                )
+            },
+        )
+
+    if not has_exact_owner_approval(owner_api, number, head_sha, config):
+        approval_marker = f"{OWNER_APPROVAL_MARKER}{head_sha} -->"
+        owner_api.post(
+            f"/pulls/{number}/reviews",
+            {
+                "event": "APPROVE",
+                "commit_id": head_sha,
+                "body": (
+                    f"{approval_marker}\n"
+                    "Owner-authenticated automated approval for this exact Dependabot head after "
+                    "canonical provenance, governed semantic scope, and all required exact-head "
+                    "qualification gates passed. Repository rules remain authoritative."
+                ),
+            },
+        )
+    if not has_exact_owner_approval(owner_api, number, head_sha, config):
+        raise GovernanceError(f"PR #{number} does not have the required exact-head owner approval")
+
+
 def render_status(assessment: Assessment, decision: str, extra: list[str] | None = None) -> str:
     marker = "<!-- dependency-governance:v1 -->"
     reasons = assessment.reasons + list(extra or [])
@@ -57,27 +152,37 @@ def upsert_status_comment(api: GitHubApi, number: int, body: str, config: dict[s
 
 
 def request_dependabot_refresh(
-    api: GitHubApi, number: int, assessment: Assessment
+    owner_api: GitHubApi | None,
+    number: int,
+    assessment: Assessment,
+    config: dict[str, Any],
 ) -> str | None:
-    """Request native Dependabot regeneration when current-main ancestry is stale."""
+    """Request native Dependabot regeneration only through the configured push-capable owner."""
     stale = "Dependabot commit parent is not the current main SHA"
     if stale not in assessment.provenance.get("reasons", []):
         return None
+    verify_owner_identity(owner_api, config)
+    assert owner_api is not None
     state = str(assessment.provenance.get("provenanceState") or "")
     command = "recreate" if state == "canonical-dependabot-plus-repair" else "rebase"
-    marker = f"<!-- dependency-native-refresh:{assessment.head_sha}:{command} -->"
-    comments = api.paginate(f"/issues/{number}/comments")
-    if any(marker in str(comment.get("body") or "") for comment in comments):
+    marker = f"{OWNER_REFRESH_MARKER}{assessment.head_sha}:{command} -->"
+    comments = owner_api.paginate(f"/issues/{number}/comments")
+    if any(
+        marker in str(comment.get("body") or "")
+        and (comment.get("user") or {}).get("login") == config["ownerApprovalLogin"]
+        and (comment.get("user") or {}).get("id") == config["ownerApprovalUserId"]
+        for comment in comments
+    ):
         return command
-    api.post(
+    owner_api.post(
         f"/issues/{number}/comments",
         {
             "body": (
                 f"@dependabot {command}\n\n"
                 f"{marker}\n"
-                "Requested by trusted dependency governance because the exact Dependabot source "
-                "commit is no longer parented on current main. Qualification will restart on the "
-                "new exact head; no merge or security gate is bypassed."
+                "Requested by the configured push-capable repository owner because the exact "
+                "Dependabot source commit is no longer parented on current main. Qualification "
+                "restarts on the new exact head; no merge or security gate is bypassed."
             )
         },
     )
@@ -101,7 +206,12 @@ def dispatch_main_qualification(api: GitHubApi, config: dict[str, Any]) -> None:
         )
 
 
-def merge_exact_head(api: GitHubApi, assessment: Assessment, config: dict[str, Any]) -> dict[str, Any]:
+def merge_exact_head(
+    api: GitHubApi,
+    owner_api: GitHubApi | None,
+    assessment: Assessment,
+    config: dict[str, Any],
+) -> dict[str, Any]:
     number = int(assessment.pull["number"])
     refreshed = fetch_assessment(api, number, config)
     if refreshed.head_sha != assessment.head_sha:
@@ -110,6 +220,10 @@ def merge_exact_head(api: GitHubApi, assessment: Assessment, config: dict[str, A
         raise GovernanceError("main changed during pre-merge refresh")
     if not refreshed.eligible:
         return {"merged": False, "assessment": refreshed}
+    verify_owner_identity(owner_api, config)
+    assert owner_api is not None
+    if not has_exact_owner_approval(owner_api, number, refreshed.head_sha, config):
+        raise GovernanceError("exact-head owner approval disappeared before merge")
     result = api.put(
         f"/pulls/{number}/merge",
         {
@@ -130,6 +244,7 @@ def merge_exact_head(api: GitHubApi, assessment: Assessment, config: dict[str, A
 
 def reconcile_one(
     api: GitHubApi,
+    owner_api: GitHubApi | None,
     number: int,
     config: dict[str, Any],
     allow_merge: bool,
@@ -140,7 +255,7 @@ def reconcile_one(
         return f"PR #{number}: ignored non-Dependabot pull request"
     assessment = fetch_assessment(api, number, config)
     if not assessment.eligible:
-        refresh = request_dependabot_refresh(api, number, assessment)
+        refresh = request_dependabot_refresh(owner_api, number, assessment, config)
         decision = f"native Dependabot {refresh} requested" if refresh else "manual review required"
         upsert_status_comment(api, number, render_status(assessment, decision), config)
         if refresh:
@@ -150,7 +265,8 @@ def reconcile_one(
         upsert_status_comment(api, number, render_status(assessment, "qualified; merge deferred"), config)
         return f"PR #{number}: qualified; merge deferred"
 
-    merged = merge_exact_head(api, assessment, config)
+    ensure_owner_review_and_approval(owner_api, assessment, config)
+    merged = merge_exact_head(api, owner_api, assessment, config)
     refreshed: Assessment = merged["assessment"]
     if not merged["merged"]:
         upsert_status_comment(api, number, render_status(refreshed, "manual review required"), config)
