@@ -222,7 +222,9 @@ def validate_actions(
     metadata: list[dict[str, str]],
     config: dict[str, Any],
 ) -> dict[str, Any]:
-    # A canonical Dependabot action-only diff is itself the reviewed semantic boundary.\n    # Mixed edits fail below because every +/- line must be an immutable uses replacement.\n    reasons: list[str] = []
+    # A canonical Dependabot action-only diff is itself the reviewed semantic boundary.
+    # Mixed edits fail below because every +/- line must be an immutable uses replacement.
+    reasons: list[str] = []
     changes: list[dict[str, str]] = []
     for file in files:
         filename = str(file.get("filename", ""))
