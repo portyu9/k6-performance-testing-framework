@@ -4,6 +4,7 @@ from __future__ import annotations
 import unittest
 
 from dependency_governance_lib.models import GovernanceError
+from dependency_governance_lib.provenance import REPAIR_MESSAGE
 from dependency_repair import synchronize_dockerfile
 
 OLD_COMMIT = "1" * 40
@@ -16,6 +17,9 @@ FROM grafana/k6:2.3.0@sha256:{'a' * 64} AS upstream-release
 
 
 class DependencyRepairSelfCheck(unittest.TestCase):
+    def test_repair_commit_allows_dependabot_native_rebase(self) -> None:
+        self.assertIn("[dependabot skip]", REPAIR_MESSAGE)
+
     def test_source_provenance_is_updated_exactly(self) -> None:
         repaired = synchronize_dockerfile(
             SOURCE,
