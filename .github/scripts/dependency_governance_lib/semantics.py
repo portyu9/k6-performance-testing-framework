@@ -12,33 +12,67 @@ def parse_override_go_mod(
     text: str,
     config: dict[str, Any],
 ) -> tuple[str, str, dict[str, str]] | None:
+    """Parse direct override authority while allowing non-authoritative indirect metadata."""
     module = ""
     go_version = ""
     versions: dict[str, str] = {}
+    seen_modules: set[str] = set()
+    in_require_block = False
     dependencies = {
         str(value) for value in config["ecosystems"]["gomod-security-override"]["dependencies"]
     }
+
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("//"):
             continue
         if line.startswith("module "):
-            if module:
+            if in_require_block or module or len(line.split()) != 2:
                 return None
             module = line.removeprefix("module ").strip()
-        elif line.startswith("go "):
-            if go_version:
+            continue
+        if line.startswith("go "):
+            if in_require_block or go_version or len(line.split()) != 2:
                 return None
             go_version = line.removeprefix("go ").strip()
-        elif line.startswith("require "):
-            parts = line.split()
-            if len(parts) != 3 or parts[1] not in dependencies or parts[1] in versions:
+            continue
+        if line == "require (":
+            if in_require_block:
                 return None
-            versions[parts[1]] = parts[2]
-        else:
+            in_require_block = True
+            continue
+        if line == ")":
+            if not in_require_block:
+                return None
+            in_require_block = False
+            continue
+
+        parts = line.split()
+        if not in_require_block:
+            if not parts or parts[0] != "require":
+                return None
+            parts = parts[1:]
+        if len(parts) not in {2, 4}:
             return None
+        name, version = parts[0], parts[1]
+        indirect = len(parts) == 4 and parts[2:] == ["//", "indirect"]
+        if len(parts) == 4 and not indirect:
+            return None
+        if not re.fullmatch(r"v\d+\.\d+\.\d+", version):
+            return None
+        if name in seen_modules:
+            return None
+        seen_modules.add(name)
+        if indirect:
+            if name in dependencies:
+                return None
+            continue
+        if name not in dependencies:
+            return None
+        versions[name] = version
+
     expected_module = str(config["ecosystems"]["gomod-security-override"]["module"])
-    if module != expected_module or not go_version or set(versions) != dependencies:
+    if in_require_block or module != expected_module or not go_version or set(versions) != dependencies:
         return None
     return module, go_version, versions
 
@@ -86,13 +120,9 @@ def validate_go_override(
         new_version = semver_tuple(new_text)
         if not old_version or not new_version:
             reasons.append(f"{dependency} override versions must be strict semantic versions")
-        elif not (
-            new_version[0] == old_version[0]
-            and new_version[1] == old_version[1]
-            and new_version[2] > old_version[2]
-        ):
+        elif new_version[0] != old_version[0] or new_version <= old_version:
             reasons.append(
-                f"{dependency} autonomous security override updates are patch-only within the same minor line"
+                f"{dependency} autonomous security override updates must increase within the same major line"
             )
         changes.append({"dependency": dependency, "from": old_text, "to": new_text})
 
@@ -116,10 +146,20 @@ def validate_go_override(
             continue
         if item.get("dependencyType") != "direct:production":
             reasons.append(f"{dependency} signed dependency type must be direct:production")
-        if item.get("updateType") not in config["allowedGoOverrideUpdateTypes"]:
+        update_type = str(item.get("updateType") or "")
+        if update_type not in config["allowedGoOverrideUpdateTypes"]:
             reasons.append(
-                f"{dependency} Go override update type {item.get('updateType') or 'unknown'} is not autonomous"
+                f"{dependency} Go override update type {update_type or 'unknown'} is not autonomous"
             )
+        old_version = semver_tuple(change["from"])
+        new_version = semver_tuple(change["to"])
+        if old_version and new_version:
+            if "semver-patch" in update_type and new_version[:2] != old_version[:2]:
+                reasons.append(f"{dependency} signed patch metadata does not describe a patch-only change")
+            if "semver-minor" in update_type and (
+                new_version[0] != old_version[0] or new_version[1] <= old_version[1]
+            ):
+                reasons.append(f"{dependency} signed minor metadata does not describe a minor-line increase")
         if normalize_version(item.get("version", "")) != normalize_version(change["to"]):
             reasons.append(f"{dependency} signed dependency-version does not match head go.mod")
 
@@ -182,7 +222,7 @@ def validate_actions(
     metadata: list[dict[str, str]],
     config: dict[str, Any],
 ) -> dict[str, Any]:
-    reasons = validate_manual_path_scope(files, config)
+    # A canonical Dependabot action-only diff is itself the reviewed semantic boundary.\n    # Mixed edits fail below because every +/- line must be an immutable uses replacement.\n    reasons: list[str] = []
     changes: list[dict[str, str]] = []
     for file in files:
         filename = str(file.get("filename", ""))
