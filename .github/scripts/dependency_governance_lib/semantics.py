@@ -11,11 +11,12 @@ from .provenance import validate_manual_path_scope
 def parse_override_go_mod(
     text: str,
     config: dict[str, Any],
-) -> tuple[str, str, dict[str, str]] | None:
-    """Parse direct override authority while allowing non-authoritative indirect metadata."""
+) -> tuple[str, str, dict[str, str], dict[str, str]] | None:
+    """Parse direct override authority while retaining indirect metadata for equality proof."""
     module = ""
     go_version = ""
     versions: dict[str, str] = {}
+    indirect_versions: dict[str, str] = {}
     seen_modules: set[str] = set()
     in_require_block = False
     dependencies = {
@@ -66,6 +67,7 @@ def parse_override_go_mod(
         if indirect:
             if name in dependencies:
                 return None
+            indirect_versions[name] = version
             continue
         if name not in dependencies:
             return None
@@ -74,7 +76,7 @@ def parse_override_go_mod(
     expected_module = str(config["ecosystems"]["gomod-security-override"]["module"])
     if in_require_block or module != expected_module or not go_version or set(versions) != dependencies:
         return None
-    return module, go_version, versions
+    return module, go_version, versions, indirect_versions
 
 
 def validate_go_override(
@@ -108,6 +110,8 @@ def validate_go_override(
         return {"eligible": False, "reasons": unique(reasons), "changes": []}
     if base_model[:2] != head_model[:2]:
         reasons.append("module path and Go language version must remain unchanged")
+    if base_model[3] != head_model[3]:
+        reasons.append("indirect Go module metadata must remain unchanged in autonomous override updates")
 
     dependencies = [str(value) for value in policy["dependencies"]]
     changes: list[dict[str, str]] = []
