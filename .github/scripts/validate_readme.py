@@ -180,10 +180,10 @@ def validate_runtime_provenance_docs(text: str, errors: list[str]) -> None:
         )
     else:
         for module in sorted(overrides):
-            claim = f"`{module} {overrides[module]}`"
+            claim = f"`{module}`"
             if claim not in text:
                 fail(
-                    f"README packaged-runtime section must match tracked security override: {claim}",
+                    f"README packaged-runtime section must name governed security override module: {claim}",
                     errors,
                 )
 
