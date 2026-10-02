@@ -4,6 +4,21 @@
 
 Security fixes are applied to the current default branch. Historical commits, tags, forks, and unsupported dependency versions may not receive fixes.
 
+## Required pre-main security gate
+
+Every pull request is blocked from `main` unless the required `security-gate` succeeds. The gate covers the repository's first-party stack as follows:
+
+- JavaScript/TypeScript: CodeQL `security-extended`;
+- Python: CodeQL `security-extended`;
+- repository-owned Go: CodeQL `security-extended` after compiling `docker/security-overrides`;
+- GitHub Actions workflow code: CodeQL Actions analysis;
+- Bash/shell: digest-verified ShellCheck;
+- repository configuration and committed secret material: Trivy filesystem misconfiguration/secret scanning;
+- the built k6 container and compiled dependency graph: Trivy image vulnerability scanning;
+- pull-request dependency diffs: GitHub Dependency Review when the dependency graph is available.
+
+The security workflow also runs `.github/scripts/validate_security_stack.py`, which fails closed if a recognized first-party code language appears without an assigned scanner. Scanner and workflow dependencies are immutable or digest-verified.
+
 ## Reporting a vulnerability
 
 Do not disclose suspected vulnerabilities, credentials, tokens, exploit details, or sensitive test data in a public issue.
