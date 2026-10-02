@@ -122,7 +122,14 @@ def render_status(assessment: Assessment, decision: str, extra: list[str] | None
         lines.extend(["", "Proven semantic changes:"])
         for change in changes[:20]:
             if "action" in change:
-                lines.append(f"- `{change['action']}` -> `{change['version']}` in `{change['file']}`")
+                lag = (
+                    f" (signed Dependabot metadata: `{change.get('signedVersion')}`)"
+                    if change.get("metadataLagAccepted")
+                    else ""
+                )
+                lines.append(
+                    f"- `{change['action']}` -> `{change['version']}` in `{change['file']}`{lag}"
+                )
             else:
                 lines.append(f"- `{change.get('dependency')}`: `{change.get('from')}` -> `{change.get('to')}`")
     if reasons:
