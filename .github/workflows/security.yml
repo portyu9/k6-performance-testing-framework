@@ -28,6 +28,8 @@ jobs:
           python3 .github/scripts/validate_workflow_pins.py
           python3 .github/scripts/validate_runtime_provenance.py
           python3 .github/scripts/validate_security_stack.py
+          python3 -m py_compile .github/scripts/validate_codeql_sarif.py .github/scripts/validate_codeql_sarif_selfcheck.py
+          python3 .github/scripts/validate_codeql_sarif_selfcheck.py
 
   codeql_source:
     name: CodeQL source stack
@@ -48,7 +50,14 @@ jobs:
           languages: javascript-typescript,python,actions
           queries: security-extended
       - name: Analyze JavaScript, Python, and Actions
+        id: analyze-source
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          output: reports/security/codeql-source
+      - name: Enforce CodeQL source security threshold
+        env:
+          SARIF_DIR: ${{ steps.analyze-source.outputs.sarif-output }}
+        run: python3 .github/scripts/validate_codeql_sarif.py "$SARIF_DIR"
 
   codeql_go:
     name: CodeQL Go
@@ -78,9 +87,15 @@ jobs:
         working-directory: docker/security-overrides
         run: go test -mod=mod ./...
       - name: Analyze Go
+        id: analyze-go
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: /language:go
+          output: reports/security/codeql-go
+      - name: Enforce CodeQL Go security threshold
+        env:
+          SARIF_DIR: ${{ steps.analyze-go.outputs.sarif-output }}
+        run: python3 .github/scripts/validate_codeql_sarif.py "$SARIF_DIR"
 
   shellcheck:
     name: ShellCheck
