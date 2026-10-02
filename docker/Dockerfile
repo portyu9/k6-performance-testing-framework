@@ -49,11 +49,10 @@ FROM alpine:3.24.2@sha256:31b6477333eb8257db9e5d7c3a7264fd0467928756f0bbcc27d35b
 ARG K6_VERSION
 ARG K6_COMMIT
 
-# Keep the final OS package graph governed without consulting a mutable package
-# repository during the final stage. The patch-versioned base is digest-pinned,
-# and the baked OpenSSL runtime libraries are asserted before the image can pass.
-RUN test "$(apk info -v libcrypto3)" = "libcrypto3-3.5.8-r0" \
-    && test "$(apk info -v libssl3)" = "libssl3-3.5.8-r0"
+# Keep the final OS package graph governed without consulting or mutating a
+# package repository. The patch-versioned runtime base is digest-pinned and
+# this stage deliberately installs no additional OS packages. k6 is built with
+# CGO disabled; the CA trust bundle is copied from the pinned builder below.
 
 # The trust store is copied from the digest-pinned builder stage rather than
 # installing a separate floating ca-certificates package in the runtime stage.

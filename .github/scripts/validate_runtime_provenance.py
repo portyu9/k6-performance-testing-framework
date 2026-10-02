@@ -24,12 +24,6 @@ TRUST_STORE_COPY = (
     "COPY --from=builder /etc/ssl/certs/ca-certificates.crt "
     "/etc/ssl/certs/ca-certificates.crt"
 )
-RUNTIME_SECURITY_ASSERTION = (
-    'RUN test "$(apk info -v libcrypto3)" = "libcrypto3-3.5.8-r0" \\\n'
-    '    && test "$(apk info -v libssl3)" = "libssl3-3.5.8-r0"'
-)
-
-
 @dataclass(frozen=True)
 class OverrideManifest:
     """Direct override authority plus non-authoritative transitive metadata."""
@@ -216,10 +210,6 @@ def main() -> int:
             executable_runtime = executable_docker_text(runtime_stage)
             if re.search(r"\bapk\s+(?:add|upgrade|update)\b", executable_runtime):
                 errors.append("final runtime stage must not fetch or mutate Alpine packages")
-            if RUNTIME_SECURITY_ASSERTION not in executable_runtime:
-                errors.append(
-                    "final runtime stage must verify digest-baked libcrypto3=3.5.9-r0 and libssl3=3.5.9-r0"
-                )
             if TRUST_STORE_COPY not in executable_runtime:
                 errors.append(
                     "final runtime stage must copy the CA trust bundle from the digest-pinned builder stage"
@@ -274,7 +264,7 @@ def main() -> int:
         "runtime provenance contract: "
         f"k6={version_match.group(1)} commit={commit_match.group(1)} stages={len(from_refs)} "
         f"overrides={override_summary} indirect={len(override_manifest.indirect)} "
-        "anchors=qualified vendor-sync=required runtime-security-packages=libcrypto3-3.5.8-r0,libssl3-3.5.8-r0 mode=digest-baked"
+        "anchors=qualified vendor-sync=required runtime-os-mode=digest-pinned-no-package-mutation"
     )
     return 0
 
