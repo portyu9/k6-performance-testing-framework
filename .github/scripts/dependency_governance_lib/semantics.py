@@ -285,6 +285,8 @@ DOCKER_FROM_LINE = re.compile(
     r"@sha256:(?P<digest>[0-9a-f]{64})"
     r"(?P<suffix>\s+AS\s+(?P<alias>[A-Za-z0-9_.-]+)\s*)$"
 )
+K6_VERSION_ARG = re.compile(r"^ARG K6_VERSION=(?P<value>\d+\.\d+\.\d+)$")
+K6_COMMIT_ARG = re.compile(r"^ARG K6_COMMIT=(?P<value>[0-9a-f]{40})$")
 
 
 def _docker_semver(tag: str) -> tuple[int, int, int] | None:
@@ -297,7 +299,7 @@ def validate_docker(
     metadata: list[dict[str, str]],
     config: dict[str, Any],
 ) -> dict[str, Any]:
-    """Allow only signed one-for-one immutable image reference updates."""
+    """Allow immutable image updates plus the exact trusted k6 source-pin repair shape."""
     reasons: list[str] = []
     if [str(file.get("filename") or "") for file in files] != ["docker/Dockerfile"]:
         return {
@@ -314,30 +316,47 @@ def validate_docker(
             "changes": [],
         }
 
-    removed: list[re.Match[str]] = []
-    added: list[re.Match[str]] = []
+    removed_from: list[re.Match[str]] = []
+    added_from: list[re.Match[str]] = []
+    removed_version: list[re.Match[str]] = []
+    added_version: list[re.Match[str]] = []
+    removed_commit: list[re.Match[str]] = []
+    added_commit: list[re.Match[str]] = []
+
     for line in patch.splitlines():
         if line.startswith(("@@", "---", "+++")):
             continue
+        if not line.startswith(("-", "+")):
+            continue
+        value = line[1:]
+        from_match = DOCKER_FROM_LINE.fullmatch(value)
+        version_match = K6_VERSION_ARG.fullmatch(value)
+        commit_match = K6_COMMIT_ARG.fullmatch(value)
         if line.startswith("-"):
-            match = DOCKER_FROM_LINE.fullmatch(line[1:])
-            if match is None:
-                reasons.append("removed Dockerfile content is not an immutable FROM reference")
+            if from_match:
+                removed_from.append(from_match)
+            elif version_match:
+                removed_version.append(version_match)
+            elif commit_match:
+                removed_commit.append(commit_match)
             else:
-                removed.append(match)
-        elif line.startswith("+"):
-            match = DOCKER_FROM_LINE.fullmatch(line[1:])
-            if match is None:
-                reasons.append("added Dockerfile content is not an immutable FROM reference")
+                reasons.append("removed Dockerfile content is outside the governed dependency repair shape")
+        else:
+            if from_match:
+                added_from.append(from_match)
+            elif version_match:
+                added_version.append(version_match)
+            elif commit_match:
+                added_commit.append(commit_match)
             else:
-                added.append(match)
+                reasons.append("added Dockerfile content is outside the governed dependency repair shape")
 
-    if not removed or len(removed) != len(added):
+    if not removed_from or len(removed_from) != len(added_from):
         reasons.append("Docker update must replace immutable FROM references one-for-one")
         return {"eligible": False, "reasons": unique(reasons), "changes": []}
 
     changes: list[dict[str, str]] = []
-    for old, new in zip(removed, added, strict=True):
+    for old, new in zip(removed_from, added_from, strict=True):
         if old.group("image") != new.group("image"):
             reasons.append("Docker update may not replace one image dependency with another")
         if old.group("platform") != new.group("platform") or old.group("alias") != new.group("alias"):
@@ -396,7 +415,40 @@ def validate_docker(
             elif "semver-minor" in update_type and new_version[1] <= old_version[1]:
                 reasons.append(f"{dependency} signed minor metadata does not describe a minor-line increase")
 
-    return {"eligible": not reasons, "reasons": unique(reasons), "changes": changes}
+    repair_line_count = (
+        len(removed_version) + len(added_version) + len(removed_commit) + len(added_commit)
+    )
+    if repair_line_count:
+        k6_changes = [
+            change
+            for change in changes
+            if change["dependency"] == "grafana/k6"
+            and change["fromTag"] != change["toTag"]
+        ]
+        if (
+            len(k6_changes) != 1
+            or len(changes) != 1
+            or len(removed_version) != 1
+            or len(added_version) != 1
+            or len(removed_commit) != 1
+            or len(added_commit) != 1
+        ):
+            reasons.append("k6 source repair must pair one marker update with exactly two source-pin replacements")
+        else:
+            k6_change = k6_changes[0]
+            if removed_version[0].group("value") != k6_change["fromTag"]:
+                reasons.append("removed K6_VERSION does not match the previous k6 marker tag")
+            if added_version[0].group("value") != k6_change["toTag"]:
+                reasons.append("repaired K6_VERSION does not match the new k6 marker tag")
+            if removed_commit[0].group("value") == added_commit[0].group("value"):
+                reasons.append("repaired K6_COMMIT did not change")
+
+    return {
+        "eligible": not reasons,
+        "reasons": unique(reasons),
+        "changes": changes,
+        "sourceRepair": bool(repair_line_count),
+    }
 
 
 
