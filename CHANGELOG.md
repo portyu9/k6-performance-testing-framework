@@ -16,6 +16,8 @@ The format is based on Keep a Changelog and the project uses semantic versioning
 
 ### Changed
 
+- Runtime qualification now uses a patch-versioned, digest-pinned Alpine 3.24.2 image and verifies its baked OpenSSL libraries without a mutable final-stage package fetch.
+- Repository-owned Go override metadata now uses the renamed canonical repository module path.
 - Product positioning centers on **k6 Performance Testing Framework**.
 - Repository identity uses the line **Safe by default. Evidence by design.**
 - Workflow badge URLs use the renamed repository path.

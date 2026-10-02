@@ -24,9 +24,8 @@ TRUST_STORE_COPY = (
     "COPY --from=builder /etc/ssl/certs/ca-certificates.crt "
     "/etc/ssl/certs/ca-certificates.crt"
 )
-RUNTIME_SECURITY_PATCH = """RUN apk add --no-cache \\
-    libcrypto3=3.5.8-r0 \\
-    libssl3=3.5.8-r0"""
+RUNTIME_SECURITY_ASSERTION = """RUN test "$(apk info -v libcrypto3)" = "libcrypto3-3.5.9-r0" \\
+    && test "$(apk info -v libssl3)" = "libssl3-3.5.9-r0""""
 
 
 @dataclass(frozen=True)
@@ -213,11 +212,11 @@ def main() -> int:
             errors.append("Dockerfile must contain exactly one named final runtime stage")
         else:
             executable_runtime = executable_docker_text(runtime_stage)
-            if re.search(r"\bapk\s+(?:upgrade|update)\b", executable_runtime):
-                errors.append("final runtime stage must never run apk update or apk upgrade")
-            if executable_runtime.count("apk add") != 1 or RUNTIME_SECURITY_PATCH not in executable_runtime:
+            if re.search(r"\bapk\s+(?:add|upgrade|update)\b", executable_runtime):
+                errors.append("final runtime stage must not fetch or mutate Alpine packages")
+            if RUNTIME_SECURITY_ASSERTION not in executable_runtime:
                 errors.append(
-                    "final runtime stage may install only exact libcrypto3=3.5.8-r0 and libssl3=3.5.8-r0 security patches"
+                    "final runtime stage must verify digest-baked libcrypto3=3.5.9-r0 and libssl3=3.5.9-r0"
                 )
             if TRUST_STORE_COPY not in executable_runtime:
                 errors.append(
@@ -273,7 +272,7 @@ def main() -> int:
         "runtime provenance contract: "
         f"k6={version_match.group(1)} commit={commit_match.group(1)} stages={len(from_refs)} "
         f"overrides={override_summary} indirect={len(override_manifest.indirect)} "
-        "anchors=qualified vendor-sync=required runtime-security-patches=libcrypto3-3.5.8-r0,libssl3-3.5.8-r0"
+        "anchors=qualified vendor-sync=required runtime-security-packages=libcrypto3-3.5.9-r0,libssl3-3.5.9-r0 mode=digest-baked"
     )
     return 0
 

@@ -184,7 +184,7 @@ For runtime variables, workload models, metrics/threshold semantics, evidence in
 
 [`docker/Dockerfile`](docker/Dockerfile) is the single tracked runtime source. The executing k6 binary is rebuilt from reviewed source identity and the governed security overrides `golang.org/x/crypto v0.57.0` and `google.golang.org/grpc v1.83.2`.
 
-The final runtime overlays only the exact Alpine security packages `libcrypto3=3.5.8-r0` and `libssl3=3.5.8-r0`; broad `apk update` / `apk upgrade` operations are forbidden. The image runs as numeric non-root user `12345`.
+The final runtime is pinned to Alpine 3.24.2 by digest and verifies the baked runtime libraries as `libcrypto3=3.5.9-r0` and `libssl3=3.5.9-r0` without fetching a mutable package index during the final image build; broad `apk update` / `apk upgrade` operations are forbidden, and final-stage `apk add` is not used. The image runs as numeric non-root user `12345`.
 
 The built image is **not claimed to be bit-for-bit reproducible from the Git commit alone** because external source/package retrieval and build-tool behavior remain inputs. Built-image Trivy evidence attests the OS and Go-binary package state actually produced by the governed build.
 

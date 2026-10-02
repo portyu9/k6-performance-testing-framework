@@ -45,16 +45,15 @@ RUN awk ' \
     && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
        go build -trimpath -o /out/k6
 
-FROM alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS runtime
+FROM alpine:3.24.2@sha256:31b6477333eb8257db9e5d7c3a7264fd0467928756f0bbcc27d35bea5d28cdbd AS runtime
 ARG K6_VERSION
 ARG K6_COMMIT
 
-# Keep the final OS package graph governed. The base stays digest-pinned while
-# only the exact OpenSSL fixes required by the image vulnerability gate may be
-# overlaid; broad apk update/upgrade operations remain forbidden.
-RUN apk add --no-cache \
-    libcrypto3=3.5.8-r0 \
-    libssl3=3.5.8-r0
+# Keep the final OS package graph governed without consulting a mutable package
+# repository during the final stage. The patch-versioned base is digest-pinned,
+# and the baked OpenSSL runtime libraries are asserted before the image can pass.
+RUN test "$(apk info -v libcrypto3)" = "libcrypto3-3.5.9-r0" \
+    && test "$(apk info -v libssl3)" = "libssl3-3.5.9-r0"
 
 # The trust store is copied from the digest-pinned builder stage rather than
 # installing a separate floating ca-certificates package in the runtime stage.
