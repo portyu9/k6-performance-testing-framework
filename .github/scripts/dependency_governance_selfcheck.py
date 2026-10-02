@@ -18,7 +18,7 @@ HEAD = '2' * 40
 OLD = '3' * 40
 NEW = '4' * 40
 NOW = datetime(2026, 9, 1, 20, tzinfo=timezone.utc)
-REPO = 'portyu9/qa-automation-load-k6'
+REPO = 'portyu9/k6-performance-testing-framework'
 
 
 def meta(name: str, version: str, update: str) -> str:

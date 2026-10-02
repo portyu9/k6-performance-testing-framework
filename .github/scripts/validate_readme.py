@@ -188,16 +188,8 @@ def validate_runtime_provenance_docs(text: str, errors: list[str]) -> None:
                 )
 
     docker_text = DOCKERFILE.read_text(encoding="utf-8")
-    for package in ("libcrypto3", "libssl3"):
-        match = re.search(rf"\b{re.escape(package)}=([0-9][A-Za-z0-9.+_-]*)", docker_text)
-        if not match:
-            fail(f"Dockerfile does not expose an exact {package} runtime security patch", errors)
-            continue
-        claim = f"`{package}={match.group(1)}`"
-        if claim not in text:
-            fail(f"README packaged-runtime section must match tracked Alpine patch: {claim}", errors)
-
     for claim in (
+        "final-stage package installation is forbidden",
         "broad `apk update` / `apk upgrade` operations are forbidden",
         "numeric non-root user `12345`",
         "not claimed to be bit-for-bit reproducible from the Git commit alone",

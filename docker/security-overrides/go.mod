@@ -1,4 +1,4 @@
-module github.com/portyu9/qa-automation-load-k6/docker/security-overrides
+module github.com/portyu9/k6-performance-testing-framework/docker/security-overrides
 
 go 1.26.0
 

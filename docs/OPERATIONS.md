@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This guide owns the detailed operating contract for the k6 Performance Quality Engineering Framework: target validation and authorization, smoke/load/stress/soak workload models, guardrails, deterministic fixture ownership, business metrics, threshold interpretation, summary evidence, packaged runtime provenance, dependency maintenance, and failure triage.
+This guide owns the detailed operating contract for the k6 Performance Testing Framework: target validation and authorization, smoke/load/stress/soak workload models, guardrails, deterministic fixture ownership, business metrics, threshold interpretation, summary evidence, packaged runtime provenance, dependency maintenance, and failure triage.
 
 The main [`README.md`](../README.md) is intentionally concise. Deep target/runtime/client/evidence ownership remains in [`ARCHITECTURE.md`](ARCHITECTURE.md), while gate/profile semantics and exit criteria remain in [`TEST_STRATEGY.md`](TEST_STRATEGY.md).
 
