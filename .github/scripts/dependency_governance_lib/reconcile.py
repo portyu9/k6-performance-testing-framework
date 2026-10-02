@@ -165,7 +165,7 @@ def request_dependabot_refresh(
     assert owner_api is not None
     state = str(assessment.provenance.get("provenanceState") or "")
     command = "recreate" if state == "canonical-dependabot-plus-repair" else "rebase"
-    marker = f"{OWNER_REFRESH_MARKER}{assessment.head_sha}:{command} -->"
+    marker = f"{OWNER_REFRESH_MARKER}{assessment.head_sha}:{assessment.base_sha}:{command} -->"
     comments = owner_api.paginate(f"/issues/{number}/comments")
     if any(
         marker in str(comment.get("body") or "")
