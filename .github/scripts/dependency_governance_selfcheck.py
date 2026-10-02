@@ -444,8 +444,16 @@ def check_workflow_boundary() -> None:
     assert "cron: '17 * * * *'" in WORKFLOW
     assert 'Apply deterministic dependency repair' in WORKFLOW
     owner_secret = 'DEPENDABOT_OWNER_TOKEN: ${{ secrets.DEPENDABOT_OWNER_TOKEN }}'
-    assert WORKFLOW.count(owner_secret) == 1
-    assert WORKFLOW.index(owner_secret) > WORKFLOW.index('Reconcile dependency governance')
+    assert WORKFLOW.count(owner_secret) == 2
+    repair_block = WORKFLOW[
+        WORKFLOW.index('Apply deterministic dependency repair'):
+        WORKFLOW.index('Attempt bounded dependency recovery')
+    ]
+    reconcile_block = WORKFLOW[
+        WORKFLOW.index('Reconcile dependency governance'):
+    ]
+    assert owner_secret in repair_block
+    assert owner_secret in reconcile_block
     assert "group: dependency-governance-${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || 'reconcile' }}" in WORKFLOW
 
 

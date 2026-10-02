@@ -48,6 +48,26 @@ def _current_main_sha(api: GitHubApi, config: dict[str, Any]) -> str:
     return sha
 
 
+def _verify_repair_publisher(
+    api: GitHubApi | None, config: dict[str, Any]
+) -> GitHubApi:
+    if api is None:
+        raise GovernanceError(
+            "DEPENDABOT_OWNER_TOKEN is required for owner-authenticated deterministic repair publication"
+        )
+    identity = api.get("https://api.github.com/user")
+    if not isinstance(identity, dict):
+        raise GovernanceError("repair publisher token identity response is invalid")
+    if (
+        identity.get("login") != config["ownerApprovalLogin"]
+        or identity.get("id") != config["ownerApprovalUserId"]
+    ):
+        raise GovernanceError(
+            "DEPENDABOT_OWNER_TOKEN does not authenticate the configured repository owner identity"
+        )
+    return api
+
+
 def _resolve_k6_release_commit(api: GitHubApi, version: str) -> str:
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise GovernanceError(f"unsafe k6 release version {version!r}")
@@ -81,13 +101,16 @@ def _create_blob(api: GitHubApi, text: str) -> str:
 
 def _publish_repair(
     api: GitHubApi,
+    publisher_api: GitHubApi | None,
     *,
+    config: dict[str, Any],
     branch: str,
     source_head: str,
     dockerfile: str,
 ) -> str:
     if not DEPENDABOT_DOCKER_BRANCH.fullmatch(branch):
         raise GovernanceError("repair accepts Dependabot Docker branches only")
+    publisher = _verify_repair_publisher(publisher_api, config)
     git_commit = api.get(f"/git/commits/{source_head}")
     base_tree = str(((git_commit or {}).get("tree") or {}).get("sha") or "")
     if not re.fullmatch(r"[0-9a-f]{40}", base_tree):
@@ -128,12 +151,17 @@ def _publish_repair(
     current = api.get(ref_path)
     if str(((current or {}).get("object") or {}).get("sha") or "") != source_head:
         raise GovernanceError("Dependabot branch moved before atomic source-provenance publication")
-    api.patch(ref_path, {"sha": repair_sha, "force": False})
+    # Keep commit creation on GITHUB_TOKEN so the repair commit retains the existing
+    # canonical github-actions[bot] / GitHub-signed provenance contract. Only the
+    # final ref mutation uses the verified owner token so the resulting synchronize
+    # event is owner-authenticated and GitHub executes the PR workflows normally.
+    publisher.patch(ref_path, {"sha": repair_sha, "force": False})
     return repair_sha
 
 
 def repair_pull(
     api: GitHubApi,
+    publisher_api: GitHubApi | None,
     number: int,
     config: dict[str, Any],
 ) -> dict[str, Any]:
@@ -204,6 +232,8 @@ def repair_pull(
     branch = str((pull.get("head") or {}).get("ref") or "")
     repair_sha = _publish_repair(
         api,
+        publisher_api,
+        config=config,
         branch=branch,
         source_head=source_head,
         dockerfile=updated,
@@ -254,11 +284,17 @@ def main() -> int:
         raise GovernanceError("dependency repair baseBranch must remain literal main")
     repository = os.environ.get("GITHUB_REPOSITORY", "").strip()
     token = os.environ.get("GITHUB_TOKEN", "").strip()
+    owner_token = os.environ.get("DEPENDABOT_OWNER_TOKEN", "").strip()
     api = GitHubApi(token, repository, config["maxPaginationPages"])
+    publisher_api = (
+        GitHubApi(owner_token, repository, config["maxPaginationPages"])
+        if owner_token
+        else None
+    )
     results: list[dict[str, Any]] = []
     for number in _target_numbers(api, config):
         try:
-            results.append(repair_pull(api, number, config))
+            results.append(repair_pull(api, publisher_api, number, config))
         except GovernanceError as exc:
             results.append({"pr": number, "error": str(exc)})
     print(json.dumps({"repairs": results}, indent=2, sort_keys=True))

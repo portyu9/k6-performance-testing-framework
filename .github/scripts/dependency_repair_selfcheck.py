@@ -5,7 +5,7 @@ import unittest
 
 from dependency_governance_lib.models import GovernanceError
 from dependency_governance_lib.provenance import REPAIR_MESSAGE
-from dependency_repair import synchronize_dockerfile
+from dependency_repair import _verify_repair_publisher, synchronize_dockerfile
 
 OLD_COMMIT = "1" * 40
 NEW_COMMIT = "2" * 40
@@ -15,10 +15,29 @@ ARG K6_COMMIT={OLD_COMMIT}
 FROM grafana/k6:2.3.0@sha256:{'a' * 64} AS upstream-release
 """
 
+class PublisherApi:
+    def __init__(self, login: str = "portyu9", user_id: int = 35150859):
+        self.identity = {"login": login, "id": user_id}
+
+    def get(self, path: str):
+        if path == "https://api.github.com/user":
+            return self.identity
+        raise AssertionError(path)
+
+
 
 class DependencyRepairSelfCheck(unittest.TestCase):
     def test_repair_commit_allows_dependabot_native_rebase(self) -> None:
         self.assertIn("[dependabot skip]", REPAIR_MESSAGE)
+
+
+    def test_repair_publisher_requires_configured_owner_identity(self) -> None:
+        config = {"ownerApprovalLogin": "portyu9", "ownerApprovalUserId": 35150859}
+        good = PublisherApi()
+        self.assertIs(_verify_repair_publisher(good, config), good)
+        for publisher in (None, PublisherApi("github-actions[bot]", 41898282)):
+            with self.assertRaises(GovernanceError):
+                _verify_repair_publisher(publisher, config)
 
     def test_source_provenance_is_updated_exactly(self) -> None:
         repaired = synchronize_dockerfile(
