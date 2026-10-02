@@ -9,7 +9,7 @@ from .models import unique
 PUBLISHER_BOT_LOGIN = "github-actions[bot]"
 PUBLISHER_BOT_USER_ID = 41898282
 PUBLISHER_BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
-REPAIR_MESSAGE = "chore: synchronize k6 source provenance"
+REPAIR_MESSAGE = "chore: synchronize k6 source provenance [dependabot skip]"
 
 def validate_provenance(
     pull: dict[str, Any],
