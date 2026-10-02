@@ -27,9 +27,10 @@ jobs:
         run: |
           python3 .github/scripts/validate_workflow_pins.py
           python3 .github/scripts/validate_runtime_provenance.py
+          python3 .github/scripts/validate_security_stack.py
 
-  codeql:
-    name: CodeQL
+  codeql_source:
+    name: CodeQL source stack
     needs: supply-chain-policy
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     permissions:
@@ -37,18 +38,79 @@ jobs:
       contents: read
       security-events: write
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Initialize CodeQL
+      - name: Initialize CodeQL for JavaScript, Python, and Actions
         uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
-          languages: javascript-typescript
+          languages: javascript-typescript,python,actions
           queries: security-extended
-      - name: Analyze
+      - name: Analyze JavaScript, Python, and Actions
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
 
+  codeql_go:
+    name: CodeQL Go
+    needs: supply-chain-policy
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up repository Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: docker/security-overrides/go.mod
+          cache: false
+      - name: Initialize CodeQL for Go
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: go
+          build-mode: manual
+          queries: security-extended
+      - name: Compile repository-owned Go security override package
+        working-directory: docker/security-overrides
+        run: go test -mod=mod ./...
+      - name: Analyze Go
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: /language:go
+
+  shellcheck:
+    name: ShellCheck
+    needs: supply-chain-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install digest-verified ShellCheck v0.11.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=/tmp/shellcheck-v0.11.0.linux.x86_64.tar.xz
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+            --output "$archive" \
+            https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+          echo '8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  '"$archive" | sha256sum --check --strict
+          tar -xJf "$archive" -C /tmp
+          /tmp/shellcheck-v0.11.0/shellcheck --version
+      - name: Scan every tracked shell source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' shell_files < <(git ls-files -z '*.sh' '*.bash' '*.zsh' '*.ksh')
+          if (( ${#shell_files[@]} == 0 )); then
+            echo 'no tracked shell sources discovered' >&2
+            exit 1
+          fi
+          /tmp/shellcheck-v0.11.0/shellcheck --severity=warning "${shell_files[@]}"
   trivy-repository:
     name: Trivy repository policy
     needs: supply-chain-policy
@@ -210,18 +272,20 @@ jobs:
   security-gate:
     name: security-gate
     if: always()
-    needs: [supply-chain-policy, codeql, trivy-repository, container-image, dependency-review]
+    needs: [supply-chain-policy, codeql_source, codeql_go, shellcheck, trivy-repository, container-image, dependency-review]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require applicable security domains
+      - name: Require applicable full-stack security domains
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           REPOSITORY: ${{ github.repository }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain-policy.result }}
-          CODEQL_RESULT: ${{ needs.codeql.result }}
+          CODEQL_SOURCE_RESULT: ${{ needs.codeql_source.result }}
+          CODEQL_GO_RESULT: ${{ needs.codeql_go.result }}
+          SHELLCHECK_RESULT: ${{ needs.shellcheck.result }}
           REPOSITORY_TRIVY_RESULT: ${{ needs.trivy-repository.result }}
           IMAGE_TRIVY_RESULT: ${{ needs.container-image.result }}
           DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
@@ -230,6 +294,10 @@ jobs:
 
           if [[ "$SUPPLY_CHAIN_RESULT" != "success" ]]; then
             echo "supply_chain_policy=$SUPPLY_CHAIN_RESULT" >&2
+            exit 1
+          fi
+          if [[ "$SHELLCHECK_RESULT" != "success" ]]; then
+            echo "shellcheck=$SHELLCHECK_RESULT" >&2
             exit 1
           fi
           if [[ "$REPOSITORY_TRIVY_RESULT" != "success" || "$IMAGE_TRIVY_RESULT" != "success" ]]; then
@@ -243,17 +311,17 @@ jobs:
               exit 1
             fi
             if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" ]]; then
-              if [[ "$CODEQL_RESULT" != "success" ]]; then
-                echo "internal PR requires CodeQL success; codeql=$CODEQL_RESULT" >&2
+              if [[ "$CODEQL_SOURCE_RESULT" != "success" || "$CODEQL_GO_RESULT" != "success" ]]; then
+                echo "internal PR requires full CodeQL success; source=$CODEQL_SOURCE_RESULT go=$CODEQL_GO_RESULT" >&2
                 exit 1
               fi
-            elif [[ "$CODEQL_RESULT" != "skipped" ]]; then
-              echo "fork PR should skip CodeQL because security-events write is unavailable; codeql=$CODEQL_RESULT" >&2
+            elif [[ "$CODEQL_SOURCE_RESULT" != "skipped" || "$CODEQL_GO_RESULT" != "skipped" ]]; then
+              echo "fork PR should skip CodeQL because security-events write is unavailable; source=$CODEQL_SOURCE_RESULT go=$CODEQL_GO_RESULT" >&2
               exit 1
             fi
           else
-            if [[ "$CODEQL_RESULT" != "success" ]]; then
-              echo "non-PR security run requires CodeQL success; codeql=$CODEQL_RESULT" >&2
+            if [[ "$CODEQL_SOURCE_RESULT" != "success" || "$CODEQL_GO_RESULT" != "success" ]]; then
+              echo "non-PR security run requires full CodeQL success; source=$CODEQL_SOURCE_RESULT go=$CODEQL_GO_RESULT" >&2
               exit 1
             fi
             if [[ "$DEPENDENCY_REVIEW_RESULT" != "skipped" ]]; then
@@ -262,4 +330,4 @@ jobs:
             fi
           fi
 
-          echo "Supply-chain policy, applicable CodeQL, repository policy, built-image vulnerability evidence, and Dependency Review domains passed."
+          echo "Full-stack security gate passed: supply-chain policy, CodeQL JS/Python/Actions/Go, ShellCheck, repository config/secrets, built-image vulnerabilities, and applicable Dependency Review."
