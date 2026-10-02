@@ -353,6 +353,8 @@ def check_action_patch() -> None:
         'github/codeql-action/init',
         'github/codeql-action/analyze',
     }
+    assert all(change['signedVersion'] == '4.38.1' for change in codeql['changes'])
+    assert all(change['metadataLagAccepted'] is True for change in codeql['changes'])
 
     # Metadata lag is bounded: a minor/major escape or backwards annotation remains blocked.
     escaped_patch = (
@@ -442,7 +444,9 @@ def check_workflow_boundary() -> None:
     assert "- '.github/scripts/dependency_repair.py'" in WORKFLOW
     assert "cron: '17 * * * *'" in WORKFLOW
     assert 'Apply deterministic dependency repair' in WORKFLOW
-    assert 'DEPENDABOT_OWNER_TOKEN: ${{ secrets.DEPENDABOT_OWNER_TOKEN }}' in WORKFLOW
+    owner_secret = 'DEPENDABOT_OWNER_TOKEN: ${{ secrets.DEPENDABOT_OWNER_TOKEN }}'
+    assert WORKFLOW.count(owner_secret) == 1
+    assert WORKFLOW.index(owner_secret) > WORKFLOW.index('Reconcile dependency governance')
     assert "group: dependency-governance-${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || 'reconcile' }}" in WORKFLOW
 
 
