@@ -315,6 +315,10 @@ def validate_actions(
                     f"{action} signed dependency-version does not match the workflow annotation "
                     "within the declared update envelope"
                 )
+        for change in action_changes:
+            change["signedVersion"] = signed_version
+            change["metadataLagAccepted"] = signed_version != annotated_version
+
         if not signed_tuple:
             reasons.append(f"{action} signed version is not strict semantic version metadata")
         elif signed_tuple[0] == 0 and "minor" in update_type:
