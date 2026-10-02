@@ -127,6 +127,10 @@ def check_config() -> None:
     assert any('unique' in reason for reason in gov.validate_config(broken))
     broken = deepcopy(CONFIG); broken['ecosystems']['docker']['mode'] = 'manual'
     assert any('qualified autonomous' in reason for reason in gov.validate_config(broken))
+    broken = deepcopy(CONFIG); broken['ownerApprovalRequired'] = False
+    assert any('ownerApprovalRequired' in reason for reason in gov.validate_config(broken))
+    broken = deepcopy(CONFIG); broken['ownerApprovalUserId'] = 0
+    assert any('ownerApprovalUserId' in reason for reason in gov.validate_config(broken))
 
 def check_parsers() -> None:
     assert gov.parse_positive_integer('42', 'pr') == 42 and gov.parse_bool('true') and not gov.parse_bool('false')
@@ -217,6 +221,33 @@ def check_action_patch() -> None:
     result=gov.validate_actions([{'filename':'.github/workflows/ci.yml','patch':action_patch()}], [{'name':'actions/checkout','version':'7.0.1','updateType':'version-update:semver-patch'}], CONFIG)
     assert result['eligible'], result['reasons']
 
+    # Reproduce the grouped CodeQL subpath shape from live Dependabot PR #61.
+    codeql_patch = (
+        '@@ -1 +1 @@\n'
+        f'-        uses: github/codeql-action/init@{OLD} # v4.38.0\n'
+        f'+        uses: github/codeql-action/init@{NEW} # v4.38.2\n'
+    )
+    codeql = gov.validate_actions(
+        [{'filename':'.github/workflows/security.yml','patch':codeql_patch}],
+        [{'name':'github/codeql-action/init','version':'4.38.1','updateType':'version-update:semver-patch'}],
+        CONFIG,
+    )
+    assert codeql['eligible'], codeql['reasons']
+    assert codeql['changes'][0]['action'] == 'github/codeql-action/init'
+
+    # Metadata lag is bounded: a minor/major escape or backwards annotation remains blocked.
+    escaped_patch = (
+        '@@ -1 +1 @@\n'
+        f'-        uses: github/codeql-action/init@{OLD} # v4.38.0\n'
+        f'+        uses: github/codeql-action/init@{NEW} # v4.39.0\n'
+    )
+    escaped = gov.validate_actions(
+        [{'filename':'.github/workflows/security.yml','patch':escaped_patch}],
+        [{'name':'github/codeql-action/init','version':'4.38.1','updateType':'version-update:semver-patch'}],
+        CONFIG,
+    )
+    assert not escaped['eligible']
+
 
 def check_action_refusal() -> None:
     major=gov.validate_actions([{'filename':'.github/workflows/ci.yml','patch':action_patch('8.0.0')}], [{'name':'actions/checkout','version':'8.0.0','updateType':'version-update:semver-major'}], CONFIG)
@@ -292,6 +323,7 @@ def check_workflow_boundary() -> None:
     assert "- '.github/scripts/dependency_repair.py'" in WORKFLOW
     assert "cron: '17 * * * *'" in WORKFLOW
     assert 'Apply deterministic dependency repair' in WORKFLOW
+    assert 'DEPENDABOT_OWNER_TOKEN: ${{ secrets.DEPENDABOT_OWNER_TOKEN }}' in WORKFLOW
 
 
 CHECKS=[
