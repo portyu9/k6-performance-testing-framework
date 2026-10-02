@@ -1,5 +1,5 @@
-ARG K6_VERSION=2.2.0
-ARG K6_COMMIT=00a9a1b7f552d6bb4337278b10ae25aac0f4e666
+ARG K6_VERSION=2.3.0
+ARG K6_COMMIT=e0887846143ab176d4b5483c9d52cf3b3e009f1a
 
 # Release marker retained so Dependabot continues to surface upstream k6 image
 # updates. The runtime binary is rebuilt below so security-qualified Go module
