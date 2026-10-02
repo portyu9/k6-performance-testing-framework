@@ -96,7 +96,11 @@ def docker_patch(
     )
 
 
-def go_model(x_crypto: str = '0.55.0', grpc: str = '1.83.0') -> str:
+def go_model(
+    x_crypto: str = '0.55.0',
+    grpc: str = '1.83.0',
+    indirect: str = '0.48.0',
+) -> str:
     return (
         f'module github.com/{REPO}/docker/security-overrides\n\n'
         'go 1.26.0\n\n'
@@ -104,15 +108,7 @@ def go_model(x_crypto: str = '0.55.0', grpc: str = '1.83.0') -> str:
         f'\tgolang.org/x/crypto v{x_crypto}\n'
         f'\tgoogle.golang.org/grpc v{grpc}\n'
         ')\n\n'
-        'require golang.org/x/sys v0.48.0 // indirect\n'
-    )
-
-def go_model(x_crypto: str = '0.55.0', grpc: str = '1.83.0') -> str:
-    return (
-        f'module github.com/{REPO}/docker/security-overrides\n\n'
-        'go 1.26.0\n\n'
-        f'require golang.org/x/crypto v{x_crypto}\n'
-        f'require google.golang.org/grpc v{grpc}\n'
+        f'require golang.org/x/sys v{indirect} // indirect\n'
     )
 
 
@@ -210,6 +206,12 @@ def check_go_refusal() -> None:
         api,BASE,HEAD,[{'filename':path}],
         go_metadata(('golang.org/x/crypto','0.55.1','version-update:semver-patch')),CONFIG)
     assert not result['eligible']
+    api.files[(path,HEAD)] = go_model(x_crypto='0.55.1', indirect='0.49.0')
+    result=gov.validate_go_override(
+        api,BASE,HEAD,[{'filename':path}],
+        go_metadata(('golang.org/x/crypto','0.55.1','version-update:semver-patch')),CONFIG)
+    assert not result['eligible']
+    assert any('indirect Go module metadata' in reason for reason in result['reasons'])
 
 def check_action_patch() -> None:
     result=gov.validate_actions([{'filename':'.github/workflows/ci.yml','patch':action_patch()}], [{'name':'actions/checkout','version':'7.0.1','updateType':'version-update:semver-patch'}], CONFIG)
@@ -287,6 +289,9 @@ def check_workflow_boundary() -> None:
     assert "if: github.event_name != 'pull_request'" in WORKFLOW
     assert 'pull_request_target:' in WORKFLOW and 'workflow_run:' in WORKFLOW
     assert "- '.github/scripts/dependency_governance_lib/**'" in WORKFLOW
+    assert "- '.github/scripts/dependency_repair.py'" in WORKFLOW
+    assert "cron: '17 * * * *'" in WORKFLOW
+    assert 'Apply deterministic dependency repair' in WORKFLOW
 
 
 CHECKS=[
