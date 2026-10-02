@@ -19,10 +19,26 @@
     "do-not-merge"
   ],
   "requiredWorkflows": [
-    {"workflow": "ci", "gate": "ci-gate", "file": "ci.yml"},
-    {"workflow": "extended", "gate": "extended-gate", "file": "extended.yml"},
-    {"workflow": "security", "gate": "security-gate", "file": "security.yml"},
-    {"workflow": "docs", "gate": "static-contracts", "file": "docs.yml"}
+    {
+      "workflow": "ci",
+      "gate": "ci-gate",
+      "file": "ci.yml"
+    },
+    {
+      "workflow": "extended",
+      "gate": "extended-gate",
+      "file": "extended.yml"
+    },
+    {
+      "workflow": "security",
+      "gate": "security-gate",
+      "file": "security.yml"
+    },
+    {
+      "workflow": "docs",
+      "gate": "static-contracts",
+      "file": "docs.yml"
+    }
   ],
   "allowedActionUpdateTypes": [
     "version-update:semver-patch",
@@ -32,32 +48,43 @@
   ],
   "allowedGoOverrideUpdateTypes": [
     "version-update:semver-patch",
-    "security-update:semver-patch"
+    "version-update:semver-minor",
+    "security-update:semver-patch",
+    "security-update:semver-minor"
   ],
   "manualReviewPaths": [
-    ".github/workflows/security.yml",
-    ".github/workflows/dependency-governance.yml",
+    ".github/dependabot.yml",
     ".github/dependency-governance.json",
     ".github/dependency-recovery.json",
     ".github/scripts/dependency_governance.py",
+    ".github/scripts/dependency_governance_lib/__init__.py",
+    ".github/scripts/dependency_governance_lib/github.py",
+    ".github/scripts/dependency_governance_lib/models.py",
+    ".github/scripts/dependency_governance_lib/provenance.py",
+    ".github/scripts/dependency_governance_lib/qualification.py",
+    ".github/scripts/dependency_governance_lib/reconcile.py",
+    ".github/scripts/dependency_governance_lib/runner.py",
+    ".github/scripts/dependency_governance_lib/semantics.py",
     ".github/scripts/dependency_governance_selfcheck.py",
     ".github/scripts/dependency_recovery.py",
     ".github/scripts/dependency_recovery_selfcheck.py",
-    ".github/scripts/dependency_governance_lib/__init__.py",
-    ".github/scripts/dependency_governance_lib/qualification.py",
-    ".github/scripts/dependency_governance_lib/runner.py",
-    ".github/scripts/dependency_governance_lib/models.py",
-    ".github/scripts/dependency_governance_lib/github.py",
-    ".github/scripts/dependency_governance_lib/provenance.py",
-    ".github/scripts/dependency_governance_lib/semantics.py",
-    ".github/scripts/dependency_governance_lib/reconcile.py",
-    ".github/dependabot.yml"
+    ".github/scripts/dependency_repair.py",
+    ".github/scripts/dependency_repair_selfcheck.py",
+    ".github/workflows/dependency-governance.yml",
+    ".github/workflows/security.yml"
   ],
   "ecosystems": {
     "docker": {
-      "files": ["docker/Dockerfile"],
-      "mode": "manual",
-      "reason": "docker/Dockerfile jointly defines the upstream k6 release marker, digest-pinned Go builder, digest-pinned Alpine runtime, exact k6 source commit, and tracked security-override consumption. Image updates can change runtime provenance or release/toolchain compatibility and therefore remain human-reviewed even when all qualification workflows pass."
+      "files": [
+        "docker/Dockerfile"
+      ],
+      "mode": "qualified",
+      "dependencies": [
+        "grafana/k6",
+        "golang",
+        "alpine"
+      ],
+      "reason": "Canonical Dependabot Docker updates are autonomous only when the diff is restricted to one-for-one immutable FROM reference replacements, signed dependency metadata matches the new tag, no major line is crossed, and every exact-head CI/Extended/Security/Docs gate passes."
     },
     "gomod-security-override": {
       "files": [
@@ -72,7 +99,16 @@
     },
     "github-actions": {
       "workflowPrefix": ".github/workflows/",
-      "extensions": [".yml", ".yaml"]
+      "extensions": [
+        ".yml",
+        ".yaml"
+      ]
     }
-  }
+  },
+  "allowedDockerUpdateTypes": [
+    "version-update:semver-patch",
+    "version-update:semver-minor",
+    "security-update:semver-patch",
+    "security-update:semver-minor"
+  ]
 }

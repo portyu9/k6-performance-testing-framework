@@ -56,6 +56,35 @@ def upsert_status_comment(api: GitHubApi, number: int, body: str, config: dict[s
         api.post(f"/issues/{number}/comments", {"body": body})
 
 
+def request_dependabot_refresh(
+    api: GitHubApi, number: int, assessment: Assessment
+) -> str | None:
+    """Request native Dependabot regeneration when current-main ancestry is stale."""
+    stale = "Dependabot commit parent is not the current main SHA"
+    if stale not in assessment.provenance.get("reasons", []):
+        return None
+    state = str(assessment.provenance.get("provenanceState") or "")
+    command = "recreate" if state == "canonical-dependabot-plus-repair" else "rebase"
+    marker = f"<!-- dependency-native-refresh:{assessment.head_sha}:{command} -->"
+    comments = api.paginate(f"/issues/{number}/comments")
+    if any(marker in str(comment.get("body") or "") for comment in comments):
+        return command
+    api.post(
+        f"/issues/{number}/comments",
+        {
+            "body": (
+                f"@dependabot {command}\n\n"
+                f"{marker}\n"
+                "Requested by trusted dependency governance because the exact Dependabot source "
+                "commit is no longer parented on current main. Qualification will restart on the "
+                "new exact head; no merge or security gate is bypassed."
+            )
+        },
+    )
+    return command
+
+
+
 def dispatch_main_qualification(api: GitHubApi, config: dict[str, Any]) -> None:
     failures: list[str] = []
     for expected in config["requiredWorkflows"]:
@@ -111,7 +140,11 @@ def reconcile_one(
         return f"PR #{number}: ignored non-Dependabot pull request"
     assessment = fetch_assessment(api, number, config)
     if not assessment.eligible:
-        upsert_status_comment(api, number, render_status(assessment, "manual review required"), config)
+        refresh = request_dependabot_refresh(api, number, assessment)
+        decision = f"native Dependabot {refresh} requested" if refresh else "manual review required"
+        upsert_status_comment(api, number, render_status(assessment, decision), config)
+        if refresh:
+            return f"PR #{number}: requested Dependabot {refresh} for stale exact head {assessment.head_sha}"
         return f"PR #{number}: blocked ({'; '.join(assessment.reasons[:3])})"
     if not allow_merge:
         upsert_status_comment(api, number, render_status(assessment, "qualified; merge deferred"), config)

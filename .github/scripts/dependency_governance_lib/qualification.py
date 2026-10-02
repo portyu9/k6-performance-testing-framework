@@ -126,7 +126,7 @@ def fetch_assessment(api: GitHubApi, number: int, config: dict[str, Any]) -> Ass
     head_sha = str((pull.get("head") or {}).get("sha") or "")
     repository = api.repository
     provenance = validate_provenance(pull, commits, base_sha, config, repository)
-    message = str(((commits[0].get("commit") or {}).get("message") if len(commits) == 1 else "") or "")
+    message = str(((commits[0].get("commit") or {}).get("message") if commits else "") or "")
     metadata = parse_dependabot_metadata(message)
     ecosystem = classify_ecosystem(files, config)
     semantic = validate_semantics(api, ecosystem, base_sha, head_sha, files, metadata, config)

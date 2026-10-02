@@ -16,7 +16,7 @@ from dependency_governance_lib.github import GitHubApi, classify_ecosystem, pars
 from dependency_governance_lib.models import GovernanceError, load_config, parse_positive_integer, unique
 from dependency_governance_lib.provenance import validate_provenance
 from dependency_governance_lib.qualification import latest_runs_by_path
-from dependency_governance_lib.semantics import validate_actions, validate_go_override
+from dependency_governance_lib.semantics import validate_actions, validate_docker, validate_go_override
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RECOVERY_CONFIG = ROOT / ".github" / "dependency-recovery.json"
@@ -25,6 +25,7 @@ LOG_TIMESTAMP = re.compile(
     r"^\ufeff?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s"
 )
 DEPENDABOT_BRANCH = re.compile(r"^dependabot/[A-Za-z0-9._/-]+$")
+REBASE_MARKER_PREFIX = "<!-- dependency-rebase-request:v1:"
 TERMINAL_NONBLOCKING_CONCLUSIONS = {"success", "skipped"}
 
 TRANSIENT_SIGNATURES: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -322,19 +323,12 @@ def recovery_scope_assessment(
         )
     if len(files) > config["maxChangedFiles"]:
         reasons.append(f"PR changes {len(files)} files, exceeding recovery limit {config['maxChangedFiles']}")
-    protected = [
-        str(file.get("filename"))
-        for file in files
-        if str(file.get("filename")) in config["manualReviewPaths"]
-    ]
-    if protected:
-        reasons.append("recovery is disabled for control-plane path(s): " + ", ".join(protected))
     ecosystem = classify_ecosystem(files, config)
     head_sha = str((pull.get("head") or {}).get("sha") or "")
     semantic: dict[str, Any] = {"eligible": True, "reasons": []}
     merge_policy = "governed-autonomous"
     if ecosystem == "docker":
-        merge_policy = "manual"
+        semantic = validate_docker(files, metadata, config)
     elif ecosystem == "gomod-security-override":
         semantic = validate_go_override(api, base_sha, head_sha, files, metadata, config)
     elif ecosystem == "github-actions":
@@ -343,6 +337,16 @@ def recovery_scope_assessment(
         semantic = {"eligible": False, "reasons": ["changed-file set does not map to one governed dependency ecosystem"]}
     if not semantic.get("eligible"):
         reasons.extend(str(value) for value in semantic.get("reasons") or [])
+
+    protected = [
+        str(file.get("filename"))
+        for file in files
+        if str(file.get("filename")) in config["manualReviewPaths"]
+    ]
+    # Canonical Dependabot action-only updates are proven by validate_actions().
+    # This exception is dependency-semantic, not a general bypass for protected workflows.
+    if protected and not (ecosystem == "github-actions" and semantic.get("eligible")):
+        reasons.append("recovery is disabled for control-plane path(s): " + ", ".join(protected))
     return {
         "eligible": bool(provenance.get("eligible")) and not reasons,
         "reasons": unique(reasons),
@@ -499,6 +503,21 @@ def _rerun_failed_jobs(api: GitHubApi, run_id: int) -> str:
         raise
 
 
+def request_dependabot_rebase(api: GitHubApi, number: int, base_sha: str) -> str:
+    safe_number = parse_positive_integer(number, "pull request number")
+    if not re.fullmatch(r"[0-9a-f]{40}", base_sha):
+        raise GovernanceError("rebase request base SHA is not canonical")
+    marker = f"{REBASE_MARKER_PREFIX}{base_sha} -->"
+    comments = api.paginate(f"/issues/{safe_number}/comments")
+    if any(marker in str(comment.get("body") or "") for comment in comments):
+        return "already-requested"
+    api.post(
+        f"/issues/{safe_number}/comments",
+        {"body": f"@dependabot rebase\n\n{marker}"},
+    )
+    return "requested"
+
+
 def recover_pull(
     api: GitHubApi,
     number: int,
@@ -519,7 +538,7 @@ def recover_pull(
     files = _pull_files(api, safe_number, governance_config)
     commits = _pull_commits(api, safe_number)
     provenance = validate_provenance(pull, commits, base_sha, governance_config, api.repository)
-    message = str(((commits[0].get("commit") or {}).get("message") if len(commits) == 1 else "") or "")
+    message = str(((commits[0].get("commit") or {}).get("message") if commits else "") or "")
     metadata = parse_dependabot_metadata(message)
     scope = recovery_scope_assessment(
         api, pull, files, provenance, metadata, base_sha, governance_config
@@ -529,15 +548,19 @@ def recover_pull(
         return {"pr": safe_number, "skipped": True, "reason": "recovery kill switch is disabled", "scope": scope}
     if not scope["eligible"]:
         stale_only = provenance.get("reasons") == ["Dependabot commit parent is not the current main SHA"]
+        rebase_state: str | None = None
+        if stale_only and allow_rerun:
+            rebase_state = request_dependabot_rebase(api, safe_number, base_sha)
         return {
             "pr": safe_number,
             "skipped": True,
             "reason": (
-                "waiting for Dependabot native auto-rebase; controller never mutates Dependabot branches"
+                f"Dependabot native rebase {rebase_state or 'deferred'} for current main"
                 if stale_only
                 else "recovery scope is not eligible"
             ),
             "scope": scope,
+            "rebase": rebase_state,
         }
 
     failures = [

@@ -14,7 +14,7 @@ SAFE_TERMINAL_CONCLUSIONS = {"success", "neutral", "skipped"}
 POSITIVE_INT = re.compile(r"^[1-9]\d*$")
 SEMVER = re.compile(r"^v?(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)$")
 ACTION_LINE = re.compile(
-    r"^(?P<prefix>\s*-\s+uses:\s+)"
+    r"^(?P<prefix>\s*(?:-\s+)?uses:\s+)"
     r"(?P<action>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)"
     r"@(?P<ref>[0-9a-fA-F]{40})"
     r"(?P<suffix>\s+#\s+v(?P<version>\d+(?:\.\d+){0,2})\s*)$"
@@ -172,16 +172,13 @@ def validate_config(config: dict[str, Any]) -> list[str]:
             gates.add(str(gate))
             files.add(str(filename))
 
-    for key in ("allowedActionUpdateTypes", "allowedGoOverrideUpdateTypes"):
+    for key in ("allowedActionUpdateTypes", "allowedGoOverrideUpdateTypes", "allowedDockerUpdateTypes"):
         values = config.get(key)
         if not isinstance(values, list) or not values or not all(nonempty(x) for x in values):
             errors.append(f"{key} must be a non-empty string list")
             continue
         if any("major" in str(value) for value in values):
             errors.append(f"{key} must never include major updates")
-    go_types = config.get("allowedGoOverrideUpdateTypes") or []
-    if any("minor" in str(value) for value in go_types):
-        errors.append("allowedGoOverrideUpdateTypes must be patch-only")
 
     manual_paths = config.get("manualReviewPaths")
     if not isinstance(manual_paths, list):
@@ -193,6 +190,8 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         ".github/dependency-governance.json",
         ".github/scripts/dependency_governance.py",
         ".github/scripts/dependency_governance_selfcheck.py",
+        ".github/scripts/dependency_repair.py",
+        ".github/scripts/dependency_repair_selfcheck.py",
         ".github/scripts/dependency_governance_lib/__init__.py",
         ".github/scripts/dependency_governance_lib/models.py",
         ".github/scripts/dependency_governance_lib/github.py",
@@ -213,13 +212,20 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         return unique(errors)
 
     docker = ecosystems.get("docker")
-    if not isinstance(docker, dict) or docker.get("mode") != "manual":
-        errors.append("docker ecosystem must be explicitly manual")
+    if not isinstance(docker, dict) or docker.get("mode") != "qualified":
+        errors.append("docker ecosystem must use qualified autonomous mode")
     else:
         if docker.get("files") != ["docker/Dockerfile"]:
             errors.append("docker files must be exactly ['docker/Dockerfile']")
+        dependencies = docker.get("dependencies")
+        if (
+            not isinstance(dependencies, list)
+            or sorted(dependencies) != ["alpine", "golang", "grafana/k6"]
+            or len(set(dependencies)) != 3
+        ):
+            errors.append("docker dependencies must be exactly alpine, golang, and grafana/k6")
         if not nonempty(docker.get("reason")):
-            errors.append("docker manual-review reason must be non-empty")
+            errors.append("docker qualification reason must be non-empty")
 
     gomod = ecosystems.get("gomod-security-override")
     if not isinstance(gomod, dict):
