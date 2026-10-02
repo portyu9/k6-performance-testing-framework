@@ -336,15 +336,23 @@ def check_action_patch() -> None:
     codeql_patch = (
         '@@ -1 +1 @@\n'
         f'-        uses: github/codeql-action/init@{OLD} # v4.38.0\n'
+        f'-        uses: github/codeql-action/analyze@{OLD} # v4.38.0\n'
         f'+        uses: github/codeql-action/init@{NEW} # v4.38.2\n'
+        f'+        uses: github/codeql-action/analyze@{NEW} # v4.38.2\n'
     )
     codeql = gov.validate_actions(
         [{'filename':'.github/workflows/security.yml','patch':codeql_patch}],
-        [{'name':'github/codeql-action/init','version':'4.38.1','updateType':'version-update:semver-patch'}],
+        [
+            {'name':'github/codeql-action/init','version':'4.38.1','updateType':'version-update:semver-patch'},
+            {'name':'github/codeql-action/analyze','version':'4.38.1','updateType':'version-update:semver-patch'},
+        ],
         CONFIG,
     )
     assert codeql['eligible'], codeql['reasons']
-    assert codeql['changes'][0]['action'] == 'github/codeql-action/init'
+    assert {change['action'] for change in codeql['changes']} == {
+        'github/codeql-action/init',
+        'github/codeql-action/analyze',
+    }
 
     # Metadata lag is bounded: a minor/major escape or backwards annotation remains blocked.
     escaped_patch = (
