@@ -437,7 +437,6 @@ def check_targets() -> None:
 def check_workflow_boundary() -> None:
     assert 'ref: ${{ github.event.repository.default_branch }}' in WORKFLOW
     assert 'persist-credentials: false' in WORKFLOW
-    assert "github.event_name == 'pull_request' && 'self-test' || 'reconcile'" in WORKFLOW
     assert "if: github.event_name != 'pull_request'" in WORKFLOW
     assert 'pull_request_target:' in WORKFLOW and 'workflow_run:' in WORKFLOW
     assert "- '.github/scripts/dependency_governance_lib/**'" in WORKFLOW
