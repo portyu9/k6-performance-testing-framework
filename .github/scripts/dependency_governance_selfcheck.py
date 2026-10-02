@@ -443,6 +443,7 @@ def check_workflow_boundary() -> None:
     assert "cron: '17 * * * *'" in WORKFLOW
     assert 'Apply deterministic dependency repair' in WORKFLOW
     assert 'DEPENDABOT_OWNER_TOKEN: ${{ secrets.DEPENDABOT_OWNER_TOKEN }}' in WORKFLOW
+    assert "group: dependency-governance-${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || 'reconcile' }}" in WORKFLOW
 
 
 CHECKS=[
