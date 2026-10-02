@@ -1,9 +1,9 @@
-# k6 Performance Quality Engineering Framework
+# k6 Performance Testing Framework
 
-[![CI](https://github.com/portyu9/qa-automation-load-k6/actions/workflows/ci.yml/badge.svg)](https://github.com/portyu9/qa-automation-load-k6/actions/workflows/ci.yml)
-[![Extended](https://github.com/portyu9/qa-automation-load-k6/actions/workflows/extended.yml/badge.svg)](https://github.com/portyu9/qa-automation-load-k6/actions/workflows/extended.yml)
-[![Security](https://github.com/portyu9/qa-automation-load-k6/actions/workflows/security.yml/badge.svg)](https://github.com/portyu9/qa-automation-load-k6/actions/workflows/security.yml)
-[![Docs](https://github.com/portyu9/qa-automation-load-k6/actions/workflows/docs.yml/badge.svg)](https://github.com/portyu9/qa-automation-load-k6/actions/workflows/docs.yml)
+[![CI](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/ci.yml/badge.svg)](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/ci.yml)
+[![Extended](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/extended.yml/badge.svg)](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/extended.yml)
+[![Security](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/security.yml/badge.svg)](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/security.yml)
+[![Docs](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/docs.yml/badge.svg)](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/docs.yml)
 
 [![k6](https://img.shields.io/badge/k6-performance-7D64FF?logo=k6&logoColor=white)](https://k6.io/)
 [![JavaScript](https://img.shields.io/badge/JavaScript-scripting-F7DF1E?logo=javascript&logoColor=black)](https://grafana.com/docs/k6/latest/using-k6/javascript-api/)
@@ -14,12 +14,55 @@
 [![License](https://img.shields.io/badge/License-MIT-2EA44F?logo=opensourceinitiative&logoColor=white)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-24292F?logo=github&logoColor=white)](.github/SECURITY.md)
 
-A k6 performance quality-engineering framework for **smoke, load, stress, and soak** analysis with explicit workload models, centralized thresholds, tagged business metrics, exact-host authorization, deterministic smoke execution, zero-traffic safety verification, target-class evidence, and machine-readable summaries.
+**Production-grade Grafana k6 performance testing framework for smoke, load, stress, and soak testing.**
+
+**Safe by default. Evidence by design.** The framework combines explicit workload models, centralized thresholds, tagged business metrics, exact-host authorization, deterministic smoke execution, zero-traffic safety verification, target-class evidence, GitHub Actions, Docker, and machine-readable summaries.
 
 > [!CAUTION]
 > `load`, `stress`, and `soak` are controlled traffic experiments—not ordinary automated tests. Routine CI performs bounded loopback smoke and zero-traffic profile inspection; sustained traffic requires explicit target ownership, opt-in, and exact-host authorization.
 
-**Start here:** [capabilities](#capabilities) · [architecture](#architecture) · [safety-model](#safety-model) · [quick-start](#quick-start) · [repository-map](#repository-map) · [documentation](#documentation)
+**Start here:** [quick start](#quick-start) · [verified evidence](#verified-evidence) · [examples](#examples) · [capabilities](#capabilities) · [architecture](#architecture) · [safety model](#safety-model) · [documentation](#documentation)
+
+
+## Verified evidence
+
+The repository does not rely on a marketing-only example. A successful CI smoke run against the repository-owned loopback fixture produced this machine-readable headline on **2026-09-16**:
+
+```text
+runId=gha-35061470863-1
+target=127.0.0.1
+targetClass=local-fixture
+iterations=3
+requests=5
+failedRate=0
+p95Ms=1.1928151999999999
+checksRate=1
+businessAttempts=5
+businessSuccessRate=1
+businessFailureRate=0
+businessP95Ms=1.1928151999999999
+thresholdBreaches=0
+```
+
+That run completed the `guardrails`, `smoke`, and aggregate `ci-gate` jobs successfully. The numbers above are evidence from that bounded local-fixture run, **not a benchmark claim for another service or environment**.
+
+**Proof:** [GitHub Actions run 35061470863](https://github.com/portyu9/k6-performance-testing-framework/actions/runs/35061470863) · [summary example](examples/summary-output/example-summary.json) · [evidence guide](examples/summary-output/README.md)
+
+## Examples
+
+The examples are intentionally thin: they teach the native k6 and repository contracts without creating a second framework DSL or bypassing the target-authorization model.
+
+| Example | What it demonstrates |
+| --- | --- |
+| [API smoke](examples/api-smoke/README.md) | Deterministic API smoke execution against the repository-owned fixture |
+| [Constant / arrival-rate workloads](examples/constant-arrival-rate/README.md) | Arrival-rate semantics, VU capacity, dropped-iteration interpretation |
+| [Threshold policy](examples/threshold-policy/README.md) | Centralized checks, error-rate, latency, and business thresholds |
+| [Custom business metrics](examples/custom-business-metrics/README.md) | Stable low-cardinality domain attempts, success/failure, and duration |
+| [GitHub Actions](examples/github-actions/README.md) | Safe PR CI, zero-traffic profile inspection, artifacts, and stable gates |
+| [Docker](examples/docker/README.md) | Governed runtime build, non-root execution, and safe default startup |
+| [Summary output](examples/summary-output/README.md) | Machine-readable evidence and how to interpret it |
+
+For the full map, see [`examples/README.md`](examples/README.md).
 
 ## Capabilities
 
@@ -120,6 +163,7 @@ For runtime variables, workload models, metrics/threshold semantics, evidence in
 ├── .github/
 ├── docker/
 ├── docs/
+├── examples/
 ├── lib/
 ├── scripts/
 └── tests/
@@ -164,8 +208,16 @@ The docs workflow exposes `static-contracts`. Workflow definitions: [`ci.yml`](.
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Target/configuration, authorization, fixture, runtime, workload, client/metric, evidence boundaries |
 | [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) | Gate model, profile semantics, interpretation, exit criteria |
 | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Commands, runtime inputs, safety, workload models, metrics, evidence, runtime provenance, dependencies, triage |
+| [`docs/K6-GITHUB-ACTIONS.md`](docs/K6-GITHUB-ACTIONS.md) | Safe k6 performance testing in GitHub Actions and CI evidence design |
+| [`docs/K6-THRESHOLDS-AND-CHECKS.md`](docs/K6-THRESHOLDS-AND-CHECKS.md) | k6 thresholds vs checks, SLO gates, and interpretation |
+| [`docs/K6-LOAD-TEST-SAFETY.md`](docs/K6-LOAD-TEST-SAFETY.md) | Safe load-test authorization, target control, and zero-traffic validation |
 
 The deeper workload, authorization, evidence, and performance-interpretation detail lives in `/docs`; the main README intentionally retains only the architecture diagram above.
+
+
+## Releases
+
+This project uses semantic versioning for public release checkpoints. Changes accumulate under **Unreleased** in [`CHANGELOG.md`](CHANGELOG.md); the release checklist and evidence requirements live in [`docs/RELEASING.md`](docs/RELEASING.md). Prepared v1.0.0 release notes are tracked in [`docs/releases/v1.0.0.md`](docs/releases/v1.0.0.md) so the GitHub Release can be published from a reviewed main-branch commit rather than from an unmerged feature branch.
 
 ## Design principle
 

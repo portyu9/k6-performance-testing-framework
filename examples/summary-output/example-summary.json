@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "run": {
+    "runId": "gha-35061470863-1",
+    "targetHost": "127.0.0.1",
+    "targetClass": "local-fixture"
+  },
+  "headline": {
+    "iterations": 3,
+    "requests": 5,
+    "failedRate": 0,
+    "p95Ms": 1.1928151999999999,
+    "checksRate": 1,
+    "businessAttempts": 5,
+    "businessSuccessRate": 1,
+    "businessFailureRate": 0,
+    "businessP95Ms": 1.1928151999999999,
+    "thresholdBreaches": []
+  }
+}
