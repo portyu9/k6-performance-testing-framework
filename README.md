@@ -1,5 +1,11 @@
 # k6 Performance Testing Framework
 
+**Production-grade Grafana k6 performance testing framework for smoke, load, stress, and soak testing.**
+
+**Safe by default. Evidence by design.** Explicit workloads · centralized thresholds · business metrics · exact-host safety · GitHub Actions · Docker · machine-readable evidence
+
+**[Use this template](https://github.com/portyu9/k6-performance-testing-framework/generate)** · [Quick start](#quick-start) · [Verified evidence](#verified-evidence) · [Examples](#examples) · [Architecture](#architecture) · [Documentation](#documentation)
+
 [![CI](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/ci.yml/badge.svg)](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/ci.yml)
 [![Extended](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/extended.yml/badge.svg)](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/extended.yml)
 [![Security](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/security.yml/badge.svg)](https://github.com/portyu9/k6-performance-testing-framework/actions/workflows/security.yml)
@@ -14,15 +20,8 @@
 [![License](https://img.shields.io/badge/License-MIT-2EA44F?logo=opensourceinitiative&logoColor=white)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-24292F?logo=github&logoColor=white)](.github/SECURITY.md)
 
-**Production-grade Grafana k6 performance testing framework for smoke, load, stress, and soak testing.**
-
-**Safe by default. Evidence by design.** The framework combines explicit workload models, centralized thresholds, tagged business metrics, exact-host authorization, deterministic smoke execution, zero-traffic safety verification, target-class evidence, GitHub Actions, Docker, and machine-readable summaries.
-
 > [!CAUTION]
 > `load`, `stress`, and `soak` are controlled traffic experiments—not ordinary automated tests. Routine CI performs bounded loopback smoke and zero-traffic profile inspection; sustained traffic requires explicit target ownership, opt-in, and exact-host authorization.
-
-**Start here:** [quick start](#quick-start) · [verified evidence](#verified-evidence) · [examples](#examples) · [capabilities](#capabilities) · [architecture](#architecture) · [safety model](#safety-model) · [documentation](#documentation)
-
 
 ## Verified evidence
 
