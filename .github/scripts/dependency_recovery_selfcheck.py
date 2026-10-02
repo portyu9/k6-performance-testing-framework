@@ -146,6 +146,7 @@ class FakeApi:
         self.fixture = fixture
         self.jobs = jobs
         self.reruns: list[int] = []
+        self.comments: list[dict[str, Any]] = []
 
     def get(self, path: str) -> Any:
         if path == f"/pulls/{self.fixture['pull']['number']}":
@@ -166,13 +167,19 @@ class FakeApi:
             return self.jobs
         if path == "/pulls?state=open":
             return [self.fixture["pull"]]
+        if path == f"/issues/{number}/comments":
+            return self.comments
         raise AssertionError(f"unexpected paginate {path} selector={selector}")
 
     def post(self, path: str, payload: dict[str, Any]) -> None:
         match = re.fullmatch(r"/actions/runs/(\d+)/rerun-failed-jobs", path)
-        if not match:
-            raise AssertionError(f"unexpected POST {path}")
-        self.reruns.append(int(match.group(1)))
+        if match:
+            self.reruns.append(int(match.group(1)))
+            return
+        if path == f"/issues/{self.fixture['pull']['number']}/comments":
+            self.comments.append({"id": len(self.comments) + 1, "body": str(payload.get("body") or "")})
+            return
+        raise AssertionError(f"unexpected POST {path}")
 
 
 class RecoverySelfCheck(unittest.TestCase):
@@ -281,14 +288,19 @@ class RecoverySelfCheck(unittest.TestCase):
         self.assertEqual(result["actions"][0]["state"], "rerun-requested")
         self.assertEqual(result["scope"]["ecosystem"], "github-actions")
 
-    def test_stale_base_waits_for_native_rebase_without_mutation(self) -> None:
+    def test_stale_base_requests_one_native_rebase_per_main_sha(self) -> None:
         fixture = canonical_fixture()
         fixture["commit"]["parents"] = [{"sha": "c" * 40}]
         api = FakeApi(fixture, [job(), gate()])
-        result = recover_pull(api, fixture["pull"]["number"], GOVERNANCE, RECOVERY, True, log_loader=lambda _api, _job_id: logs(failed="EAI_AGAIN"))
+        first = recover_pull(api, fixture["pull"]["number"], GOVERNANCE, RECOVERY, True, log_loader=lambda _api, _job_id: logs(failed="EAI_AGAIN"))
+        second = recover_pull(api, fixture["pull"]["number"], GOVERNANCE, RECOVERY, True, log_loader=lambda _api, _job_id: logs(failed="EAI_AGAIN"))
         self.assertEqual(api.reruns, [])
-        self.assertTrue(result["skipped"])
-        self.assertIn("native auto-rebase", result["reason"])
+        self.assertTrue(first["skipped"])
+        self.assertEqual(first["rebase"], "requested")
+        self.assertEqual(second["rebase"], "already-requested")
+        self.assertEqual(len(api.comments), 1)
+        self.assertIn("@dependabot rebase", api.comments[0]["body"])
+        self.assertIn(fixture["base_sha"], api.comments[0]["body"])
 
     def test_workflow_run_resolution_accepts_only_dependabot_branch(self) -> None:
         fixture = canonical_fixture()
@@ -307,16 +319,22 @@ class RecoverySelfCheck(unittest.TestCase):
                 else:
                     os.environ[name] = value
 
-    def test_wiring_requires_native_rebase_and_recovery_before_governance(self) -> None:
+    def test_wiring_requires_repair_rebase_recovery_and_hourly_reconciliation(self) -> None:
         dependabot = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "dependency-governance.yml").read_text(encoding="utf-8")
         self.assertEqual(dependabot.count("rebase-strategy: auto"), 3)
         self.assertIn("RECOVERY_CONFIG: .github/dependency-recovery.json", workflow)
         self.assertIn("python .github/scripts/dependency_recovery.py --validate-config", workflow)
         self.assertIn("python .github/scripts/dependency_recovery_selfcheck.py", workflow)
+        self.assertIn("python .github/scripts/dependency_repair_selfcheck.py", workflow)
+        self.assertIn("python .github/scripts/dependency_repair.py", workflow)
         self.assertIn("ALLOW_RECOVERY_RERUN:", workflow)
+        self.assertIn("cron: '17 * * * *'", workflow)
+        self.assertLess(workflow.index("Apply deterministic dependency repair"), workflow.index("Attempt bounded dependency recovery"))
         self.assertLess(workflow.index("Attempt bounded dependency recovery"), workflow.index("Reconcile dependency governance"))
-        self.assertNotIn("update-branch", (SCRIPT_DIR / "dependency_recovery.py").read_text(encoding="utf-8"))
+        recovery_text = (SCRIPT_DIR / "dependency_recovery.py").read_text(encoding="utf-8")
+        self.assertNotIn("update-branch", recovery_text)
+        self.assertIn("@dependabot rebase", recovery_text)
 
 
 if __name__ == "__main__":
