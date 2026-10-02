@@ -6,6 +6,11 @@ from typing import Any
 from .github import parse_dependabot_metadata
 from .models import unique
 
+PUBLISHER_BOT_LOGIN = "github-actions[bot]"
+PUBLISHER_BOT_USER_ID = 41898282
+PUBLISHER_BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
+REPAIR_MESSAGE = "chore: synchronize k6 source provenance"
+
 def validate_provenance(
     pull: dict[str, Any],
     commits: list[dict[str, Any]],
@@ -61,27 +66,33 @@ def validate_provenance(
     except (TypeError, ValueError):
         reasons.append("PR created_at is invalid")
 
-    if len(commits) != 1:
-        reasons.append(f"expected exactly one untouched Dependabot commit, found {len(commits)}")
-        return {"eligible": False, "reasons": unique(reasons)}
+    if len(commits) not in {1, 2}:
+        reasons.append(
+            f"expected one untouched Dependabot commit or one trusted repair commit, found {len(commits)}"
+        )
+        return {"eligible": False, "reasons": unique(reasons), "provenanceState": "untrusted"}
 
-    commit = commits[0]
+    source = commits[0]
+    repair = commits[1] if len(commits) == 2 else None
     head_sha = str(head.get("sha") or "")
-    if commit.get("sha") != head_sha:
-        reasons.append("single commit SHA does not equal current PR head")
-    parents = commit.get("parents") or []
+    source_sha = str(source.get("sha") or "")
+    expected_head = str((repair or source).get("sha") or "")
+    if expected_head != head_sha:
+        reasons.append("final governed commit SHA does not equal current PR head")
+
+    parents = source.get("parents") or []
     if len(parents) != 1 or (parents[0] or {}).get("sha") != base_sha:
         reasons.append("Dependabot commit parent is not the current main SHA")
 
-    git = commit.get("commit") or {}
+    git = source.get("commit") or {}
     author = git.get("author") or {}
     committer = git.get("committer") or {}
     if author.get("email") != config["botAuthorEmail"]:
         reasons.append("Git author email is not the canonical Dependabot identity")
-    top_author = commit.get("author") or {}
+    top_author = source.get("author") or {}
     if top_author.get("login") != config["botLogin"] or top_author.get("id") != config["botUserId"]:
         reasons.append("materialized commit author is not the canonical Dependabot account")
-    top_committer = commit.get("committer") or {}
+    top_committer = source.get("committer") or {}
     if top_committer.get("login") != config["trustedCommitterLogin"]:
         reasons.append("materialized commit committer is not GitHub web-flow")
     if committer.get("name") != config["gitCommitterName"]:
@@ -93,7 +104,9 @@ def validate_provenance(
     if verification.get("verified") is not True:
         reasons.append("Dependabot commit signature is not verified")
     if verification.get("reason") != "valid":
-        reasons.append(f"Dependabot signature reason is {verification.get('reason') or 'unknown'}, not valid")
+        reasons.append(
+            f"Dependabot signature reason is {verification.get('reason') or 'unknown'}, not valid"
+        )
     if not str(verification.get("signature") or "").strip():
         reasons.append("verified signature material is missing")
     if not str(verification.get("payload") or "").strip():
@@ -104,7 +117,51 @@ def validate_provenance(
     if not parse_dependabot_metadata(message):
         reasons.append("signed Dependabot updated-dependencies metadata is missing")
 
-    return {"eligible": not reasons, "reasons": unique(reasons)}
+    provenance_state = "canonical-dependabot"
+    if repair is not None:
+        provenance_state = "canonical-dependabot-plus-repair"
+        repair_git = repair.get("commit") or {}
+        repair_author = repair.get("author") or {}
+        repair_committer = repair.get("committer") or {}
+        repair_git_author = repair_git.get("author") or {}
+        repair_git_committer = repair_git.get("committer") or {}
+        repair_verification = repair_git.get("verification") or {}
+        repair_parents = repair.get("parents") or []
+        expected_message = (
+            f"{REPAIR_MESSAGE}\n\n"
+            f"Generated from Dependabot source head {source_sha} by trusted default-branch "
+            "dependency-repair."
+        )
+        if repair_author.get("login") != PUBLISHER_BOT_LOGIN or repair_author.get("id") != PUBLISHER_BOT_USER_ID:
+            reasons.append("repair commit author is not canonical github-actions[bot]")
+        if repair_committer.get("login") != config["trustedCommitterLogin"]:
+            reasons.append("repair commit was not materialized by trusted GitHub web-flow")
+        if (
+            repair_git_author.get("name") != PUBLISHER_BOT_LOGIN
+            or repair_git_author.get("email") != PUBLISHER_BOT_EMAIL
+        ):
+            reasons.append("repair Git author identity is not canonical github-actions[bot]")
+        if (
+            repair_git_committer.get("name") != config["gitCommitterName"]
+            or repair_git_committer.get("email") != config["gitCommitterEmail"]
+        ):
+            reasons.append("repair Git committer identity does not match GitHub signing infrastructure")
+        if repair_verification.get("verified") is not True or repair_verification.get("reason") != "valid":
+            reasons.append("repair commit signature is not GitHub-verified as valid")
+        if not str(repair_verification.get("signature") or "").strip():
+            reasons.append("repair commit has no verifiable signature material")
+        if len(repair_parents) != 1 or (repair_parents[0] or {}).get("sha") != source_sha:
+            reasons.append("repair commit is not parented directly on the Dependabot source commit")
+        if str(repair_git.get("message") or "") != expected_message:
+            reasons.append("repair commit message does not bind the exact Dependabot source head")
+
+    return {
+        "eligible": not reasons,
+        "reasons": unique(reasons),
+        "provenanceState": provenance_state,
+        "sourceCommit": source_sha,
+        "repairCommit": str((repair or {}).get("sha") or "") or None,
+    }
 
 
 def validate_manual_path_scope(files: list[dict[str, Any]], config: dict[str, Any]) -> list[str]:
