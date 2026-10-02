@@ -245,6 +245,7 @@ def validate_actions(
                     "action": new.group("action"),
                     "fromSha": old.group("ref").lower(),
                     "toSha": new.group("ref").lower(),
+                    "fromVersion": old.group("version"),
                     "version": new.group("version"),
                 }
             )
@@ -265,8 +266,11 @@ def validate_actions(
         item = metadata_by_name.get(action)
         action_changes = [change for change in changes if change["action"] == action]
         versions = {normalize_version(change["version"]) for change in action_changes}
+        old_versions = {normalize_version(change["fromVersion"]) for change in action_changes}
         if len(versions) != 1:
             reasons.append(f"{action} has inconsistent version annotations across workflow files")
+        if len(old_versions) != 1:
+            reasons.append(f"{action} has inconsistent previous-version annotations across workflow files")
         if not item:
             continue
         if item.get("updateType") not in config["allowedActionUpdateTypes"]:
@@ -274,15 +278,38 @@ def validate_actions(
         signed_version = normalize_version(item.get("version", ""))
         signed_tuple = semver_tuple(signed_version)
         annotated_version = next(iter(versions)) if len(versions) == 1 else ""
+        old_annotated_version = next(iter(old_versions)) if len(old_versions) == 1 else ""
         annotated_tuple = semver_tuple(annotated_version) if annotated_version else None
+        old_annotated_tuple = semver_tuple(old_annotated_version) if old_annotated_version else None
         update_type = str(item.get("updateType") or "")
+
+        transition_ok = False
+        if old_annotated_tuple and annotated_tuple and annotated_tuple > old_annotated_tuple:
+            if "semver-patch" in update_type:
+                transition_ok = annotated_tuple[:2] == old_annotated_tuple[:2]
+            elif "semver-minor" in update_type:
+                transition_ok = (
+                    annotated_tuple[0] == old_annotated_tuple[0]
+                    and annotated_tuple[1] > old_annotated_tuple[1]
+                )
+        if annotated_version and old_annotated_version and not transition_ok:
+            reasons.append(
+                f"{action} workflow annotation transition is outside the declared update envelope"
+            )
+
         if annotated_version and signed_version != annotated_version:
             metadata_lag_ok = False
-            if signed_tuple and annotated_tuple and annotated_tuple >= signed_tuple:
+            if (
+                transition_ok
+                and signed_tuple
+                and old_annotated_tuple
+                and annotated_tuple
+                and old_annotated_tuple < signed_tuple <= annotated_tuple
+            ):
                 if "semver-patch" in update_type:
-                    metadata_lag_ok = annotated_tuple[:2] == signed_tuple[:2]
+                    metadata_lag_ok = signed_tuple[:2] == old_annotated_tuple[:2]
                 elif "semver-minor" in update_type:
-                    metadata_lag_ok = annotated_tuple[0] == signed_tuple[0]
+                    metadata_lag_ok = signed_tuple[0] == old_annotated_tuple[0]
             if not metadata_lag_ok:
                 reasons.append(
                     f"{action} signed dependency-version does not match the workflow annotation "
