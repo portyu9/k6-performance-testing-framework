@@ -110,5 +110,8 @@
     "version-update:semver-minor",
     "security-update:semver-patch",
     "security-update:semver-minor"
-  ]
+  ],
+  "ownerApprovalRequired": true,
+  "ownerApprovalLogin": "portyu9",
+  "ownerApprovalUserId": 35150859
 }
