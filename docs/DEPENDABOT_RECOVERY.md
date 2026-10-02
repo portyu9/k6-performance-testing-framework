@@ -16,9 +16,9 @@ Docker builds, k6 smoke execution, zero-traffic sustained-profile inspection, pr
 
 ## Dependency semantics remain authoritative
 
-Recovery does not relax dependency semantics. GitHub Actions proposals must still satisfy the immutable-SHA/action metadata policy. Go security-override proposals must still satisfy the exact minimal `go.mod`/`go.sum`, dependency-name, signed-metadata, and patch-only policy before recovery is eligible.
+Recovery does not relax dependency semantics. GitHub Actions proposals must still satisfy the immutable-SHA/action metadata policy. Go security-override proposals must still satisfy the exact constrained `go.mod`/`go.sum`, dependency-name, signed-metadata, and no-major-update policy before recovery is eligible. Patch and minor updates may qualify only after the complete exact-head gate set passes.
 
-Docker proposals are intentionally human-reviewed because `docker/Dockerfile` jointly defines k6 source/runtime/toolchain provenance. Recovery may retry a proven transient evidence-upload failure for a canonical Docker proposal, but the proposal remains manual merge regardless of retry outcome.
+Docker proposals are autonomously eligible only when canonical Dependabot provenance proves a one-for-one immutable `FROM` reference update for an allowlisted image, signed metadata matches the new tag, no major line is crossed, and the complete exact-head gate set passes. k6 release-marker updates additionally require trusted deterministic source-provenance repair.
 
 ## Deterministic failures win
 
