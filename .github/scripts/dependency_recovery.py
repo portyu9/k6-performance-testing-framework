@@ -16,7 +16,7 @@ from dependency_governance_lib.github import GitHubApi, classify_ecosystem, pars
 from dependency_governance_lib.models import GovernanceError, load_config, parse_positive_integer, unique
 from dependency_governance_lib.provenance import validate_provenance
 from dependency_governance_lib.qualification import latest_runs_by_path
-from dependency_governance_lib.semantics import validate_actions, validate_go_override
+from dependency_governance_lib.semantics import validate_actions, validate_docker, validate_go_override
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RECOVERY_CONFIG = ROOT / ".github" / "dependency-recovery.json"
@@ -334,7 +334,7 @@ def recovery_scope_assessment(
     semantic: dict[str, Any] = {"eligible": True, "reasons": []}
     merge_policy = "governed-autonomous"
     if ecosystem == "docker":
-        merge_policy = "manual"
+        semantic = validate_docker(files, metadata, config)
     elif ecosystem == "gomod-security-override":
         semantic = validate_go_override(api, base_sha, head_sha, files, metadata, config)
     elif ecosystem == "github-actions":
@@ -519,7 +519,7 @@ def recover_pull(
     files = _pull_files(api, safe_number, governance_config)
     commits = _pull_commits(api, safe_number)
     provenance = validate_provenance(pull, commits, base_sha, governance_config, api.repository)
-    message = str(((commits[0].get("commit") or {}).get("message") if len(commits) == 1 else "") or "")
+    message = str(((commits[0].get("commit") or {}).get("message") if commits else "") or "")
     metadata = parse_dependabot_metadata(message)
     scope = recovery_scope_assessment(
         api, pull, files, provenance, metadata, base_sha, governance_config
