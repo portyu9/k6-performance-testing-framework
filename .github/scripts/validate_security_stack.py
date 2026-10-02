@@ -88,6 +88,7 @@ def main() -> int:
         "CodeQL JavaScript/Python/Actions": "languages: javascript-typescript,python,actions",
         "CodeQL Go": "languages: go",
         "CodeQL Go manual build": "build-mode: manual",
+        "CodeQL Go pinned-module build": "go test -mod=mod ./...",
         "ShellCheck tracked shell discovery": "git ls-files -z '*.sh' '*.bash' '*.zsh' '*.ksh'",
         "ShellCheck pinned release": "shellcheck-v0.11.0.linux.x86_64.tar.xz",
         "ShellCheck pinned digest": "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198",
