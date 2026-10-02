@@ -11,11 +11,10 @@ from typing import Any
 
 from dependency_governance_lib.github import GitHubApi, classify_ecosystem, parse_dependabot_metadata
 from dependency_governance_lib.models import GovernanceError, load_config, parse_positive_integer
-from dependency_governance_lib.provenance import validate_provenance
+from dependency_governance_lib.provenance import REPAIR_MESSAGE, validate_provenance
 from dependency_governance_lib.semantics import validate_docker
 
 TRUSTED_BASE_BRANCH = "main"
-REPAIR_MESSAGE = "chore: synchronize k6 source provenance"
 DEPENDABOT_DOCKER_BRANCH = re.compile(r"^dependabot/docker/[A-Za-z0-9._/-]+$")
 K6_VERSION_LINE = re.compile(r"(?m)^ARG K6_VERSION=([0-9]+\.[0-9]+\.[0-9]+)$")
 K6_COMMIT_LINE = re.compile(r"(?m)^ARG K6_COMMIT=([0-9a-f]{40})$")
@@ -223,16 +222,30 @@ def _target_numbers(api: GitHubApi, config: dict[str, Any]) -> list[int]:
     direct = os.environ.get("TARGET_PR_NUMBER", "").strip()
     if direct:
         return [parse_positive_integer(direct, "TARGET_PR_NUMBER")]
+
+    workflow_branch = os.environ.get("WORKFLOW_RUN_HEAD_BRANCH", "").strip()
     pulls = api.paginate(
         f"/pulls?state=open&base={urllib.parse.quote(config['baseBranch'], safe='')}"
     )
-    return [
-        int(pull["number"])
+    canonical = [
+        pull
         for pull in pulls
         if isinstance(pull.get("number"), int)
         and (pull.get("user") or {}).get("login") == config["botLogin"]
         and (pull.get("user") or {}).get("id") == config["botUserId"]
     ]
+    if workflow_branch:
+        if not workflow_branch.startswith("dependabot/"):
+            return []
+        matches = [
+            pull
+            for pull in canonical
+            if str((pull.get("head") or {}).get("ref") or "") == workflow_branch
+        ]
+        if len(matches) != 1:
+            return []
+        return [int(matches[0]["number"])]
+    return [int(pull["number"]) for pull in canonical]
 
 
 def main() -> int:
