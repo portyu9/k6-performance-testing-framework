@@ -25,8 +25,8 @@ TRUST_STORE_COPY = (
     "/etc/ssl/certs/ca-certificates.crt"
 )
 RUNTIME_SECURITY_ASSERTION = (
-    'RUN test "$(apk info -v libcrypto3)" = "libcrypto3-3.5.9-r0" \\\n'
-    '    && test "$(apk info -v libssl3)" = "libssl3-3.5.9-r0"'
+    'RUN test "$(apk info -v libcrypto3)" = "libcrypto3-3.5.8-r0" \\\n'
+    '    && test "$(apk info -v libssl3)" = "libssl3-3.5.8-r0"'
 )
 
 
@@ -274,7 +274,7 @@ def main() -> int:
         "runtime provenance contract: "
         f"k6={version_match.group(1)} commit={commit_match.group(1)} stages={len(from_refs)} "
         f"overrides={override_summary} indirect={len(override_manifest.indirect)} "
-        "anchors=qualified vendor-sync=required runtime-security-packages=libcrypto3-3.5.9-r0,libssl3-3.5.9-r0 mode=digest-baked"
+        "anchors=qualified vendor-sync=required runtime-security-packages=libcrypto3-3.5.8-r0,libssl3-3.5.8-r0 mode=digest-baked"
     )
     return 0
 

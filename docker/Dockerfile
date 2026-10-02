@@ -52,8 +52,8 @@ ARG K6_COMMIT
 # Keep the final OS package graph governed without consulting a mutable package
 # repository during the final stage. The patch-versioned base is digest-pinned,
 # and the baked OpenSSL runtime libraries are asserted before the image can pass.
-RUN test "$(apk info -v libcrypto3)" = "libcrypto3-3.5.9-r0" \
-    && test "$(apk info -v libssl3)" = "libssl3-3.5.9-r0"
+RUN test "$(apk info -v libcrypto3)" = "libcrypto3-3.5.8-r0" \
+    && test "$(apk info -v libssl3)" = "libssl3-3.5.8-r0"
 
 # The trust store is copied from the digest-pinned builder stage rather than
 # installing a separate floating ca-certificates package in the runtime stage.
