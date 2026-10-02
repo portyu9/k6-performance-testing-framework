@@ -190,6 +190,8 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         ".github/dependency-governance.json",
         ".github/scripts/dependency_governance.py",
         ".github/scripts/dependency_governance_selfcheck.py",
+        ".github/scripts/dependency_repair.py",
+        ".github/scripts/dependency_repair_selfcheck.py",
         ".github/scripts/dependency_governance_lib/__init__.py",
         ".github/scripts/dependency_governance_lib/models.py",
         ".github/scripts/dependency_governance_lib/github.py",
