@@ -24,8 +24,10 @@ TRUST_STORE_COPY = (
     "COPY --from=builder /etc/ssl/certs/ca-certificates.crt "
     "/etc/ssl/certs/ca-certificates.crt"
 )
-RUNTIME_SECURITY_ASSERTION = """RUN test "$(apk info -v libcrypto3)" = "libcrypto3-3.5.9-r0" \\
-    && test "$(apk info -v libssl3)" = "libssl3-3.5.9-r0""""
+RUNTIME_SECURITY_ASSERTION = (
+    'RUN test "$(apk info -v libcrypto3)" = "libcrypto3-3.5.9-r0" \\\n'
+    '    && test "$(apk info -v libssl3)" = "libssl3-3.5.9-r0"'
+)
 
 
 @dataclass(frozen=True)
