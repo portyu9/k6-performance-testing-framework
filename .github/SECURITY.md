@@ -12,7 +12,7 @@ Every pull request is blocked from `main` unless the required `security-gate` su
 - Python: CodeQL `security-extended`;
 - repository-owned Go: CodeQL `security-extended` after compiling `docker/security-overrides`;
 - GitHub Actions workflow code: CodeQL Actions analysis;
-- CodeQL HIGH/CRITICAL findings (security severity `>= 7.0`) fail the pull-request gate from local SARIF before merge;
+- any CodeQL code-scanning alert, at any severity, fails the pull-request gate from local SARIF before merge;
 - Bash/shell: digest-verified ShellCheck;
 - repository configuration and committed secret material: Trivy filesystem misconfiguration/secret scanning;
 - the built k6 container and compiled dependency graph: Trivy image vulnerability scanning;
