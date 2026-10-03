@@ -109,6 +109,8 @@ def main() -> int:
         errors.append("security workflow must retain source-stack CodeQL SARIF evidence")
     if workflow_text.count("Upload CodeQL Go SARIF evidence") != 1:
         errors.append("security workflow must retain Go CodeQL SARIF evidence")
+    if workflow_text.count("python3 .github/scripts/validate_security_evidence_selfcheck.py") != 1:
+        errors.append("security workflow must exercise secret-redaction evidence self-checks")
     sarif_gate = (ROOT / ".github" / "scripts" / "validate_codeql_sarif.py").read_text(encoding="utf-8")
     if "CodeQL zero-alert gate rejected" not in sarif_gate:
         errors.append("CodeQL SARIF gate must reject every code-scanning result")
