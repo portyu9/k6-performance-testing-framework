@@ -72,6 +72,8 @@
     ".github/scripts/dependency_repair_selfcheck.py",
     ".github/scripts/validate_codeql_sarif.py",
     ".github/scripts/validate_codeql_sarif_selfcheck.py",
+    ".github/scripts/validate_security_evidence.py",
+    ".github/scripts/validate_security_evidence_selfcheck.py",
     ".github/scripts/validate_security_stack.py",
     ".github/workflows/dependency-governance.yml",
     ".github/workflows/security.yml"
