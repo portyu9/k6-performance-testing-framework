@@ -103,6 +103,11 @@ def main() -> int:
         if needle not in workflow_text:
             errors.append(f"security workflow is missing {name}")
 
+    if workflow_text.count("python3 .github/scripts/validate_codeql_sarif.py") != 2:
+        errors.append("security workflow must enforce the CodeQL SARIF threshold for source and Go scans")
+    if "BLOCKING_SECURITY_SEVERITY = 7.0" not in (ROOT / ".github" / "scripts" / "validate_codeql_sarif.py").read_text(encoding="utf-8"):
+        errors.append("CodeQL SARIF gate must retain the HIGH/CRITICAL threshold at security severity 7.0")
+
     if errors:
         print("Security stack coverage contract failed:")
         for error in errors:
