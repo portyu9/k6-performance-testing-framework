@@ -51,14 +51,15 @@ def validate_repository(report: dict) -> None:
             f"repository Trivy evidence must contain one Dockerfile configuration result; found {len(docker_results)}"
         )
     misconfigurations = findings(report, "Misconfigurations")
-    secrets = findings(report, "Secrets")
-    if misconfigurations or secrets:
-        raise ValueError(
-            f"repository Trivy gate contains findings after a successful scan: misconfigurations={misconfigurations}, secrets={secrets}"
-        )
+    secret_findings = findings(report, "Secrets")
+    if misconfigurations or secret_findings:
+        # Values derived from Trivy's Secrets field are deliberately not reflected
+        # into logs or exception text. They may contain or be tainted by sensitive
+        # material even when this validator reduces them to a count.
+        raise ValueError("repository Trivy gate contains gated findings after a successful scan")
     print(
         f"repository Trivy evidence: version={TRIVY_VERSION} dockerfileResults=1 "
-        f"misconfigurations={misconfigurations} secrets={secrets}"
+        f"misconfigurations={misconfigurations} secretFindings=none"
     )
 
 
