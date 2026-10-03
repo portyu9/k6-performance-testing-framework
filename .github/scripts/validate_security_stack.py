@@ -104,9 +104,14 @@ def main() -> int:
             errors.append(f"security workflow is missing {name}")
 
     if workflow_text.count("python3 .github/scripts/validate_codeql_sarif.py") != 2:
-        errors.append("security workflow must enforce the CodeQL SARIF threshold for source and Go scans")
-    if "BLOCKING_SECURITY_SEVERITY = 7.0" not in (ROOT / ".github" / "scripts" / "validate_codeql_sarif.py").read_text(encoding="utf-8"):
-        errors.append("CodeQL SARIF gate must retain the HIGH/CRITICAL threshold at security severity 7.0")
+        errors.append("security workflow must enforce zero CodeQL alerts for source and Go scans")
+    if workflow_text.count("Upload CodeQL source SARIF evidence") != 1:
+        errors.append("security workflow must retain source-stack CodeQL SARIF evidence")
+    if workflow_text.count("Upload CodeQL Go SARIF evidence") != 1:
+        errors.append("security workflow must retain Go CodeQL SARIF evidence")
+    sarif_gate = (ROOT / ".github" / "scripts" / "validate_codeql_sarif.py").read_text(encoding="utf-8")
+    if "CodeQL zero-alert gate rejected" not in sarif_gate:
+        errors.append("CodeQL SARIF gate must reject every code-scanning result")
 
     if errors:
         print("Security stack coverage contract failed:")

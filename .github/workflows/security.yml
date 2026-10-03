@@ -54,10 +54,18 @@ jobs:
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           output: reports/security/codeql-source
-      - name: Enforce CodeQL source security threshold
+      - name: Enforce zero CodeQL source alerts
         env:
           SARIF_DIR: ${{ steps.analyze-source.outputs.sarif-output }}
         run: python3 .github/scripts/validate_codeql_sarif.py "$SARIF_DIR"
+      - name: Upload CodeQL source SARIF evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codeql-source-sarif-${{ github.run_id }}
+          path: reports/security/codeql-source/
+          if-no-files-found: error
+          retention-days: 14
 
   codeql_go:
     name: CodeQL Go
@@ -92,10 +100,18 @@ jobs:
         with:
           category: /language:go
           output: reports/security/codeql-go
-      - name: Enforce CodeQL Go security threshold
+      - name: Enforce zero CodeQL Go alerts
         env:
           SARIF_DIR: ${{ steps.analyze-go.outputs.sarif-output }}
         run: python3 .github/scripts/validate_codeql_sarif.py "$SARIF_DIR"
+      - name: Upload CodeQL Go SARIF evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codeql-go-sarif-${{ github.run_id }}
+          path: reports/security/codeql-go/
+          if-no-files-found: error
+          retention-days: 14
 
   shellcheck:
     name: ShellCheck
