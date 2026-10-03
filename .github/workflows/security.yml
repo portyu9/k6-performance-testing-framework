@@ -28,8 +28,9 @@ jobs:
           python3 .github/scripts/validate_workflow_pins.py
           python3 .github/scripts/validate_runtime_provenance.py
           python3 .github/scripts/validate_security_stack.py
-          python3 -m py_compile .github/scripts/validate_codeql_sarif.py .github/scripts/validate_codeql_sarif_selfcheck.py
+          python3 -m py_compile .github/scripts/validate_codeql_sarif.py .github/scripts/validate_codeql_sarif_selfcheck.py .github/scripts/validate_security_evidence.py .github/scripts/validate_security_evidence_selfcheck.py
           python3 .github/scripts/validate_codeql_sarif_selfcheck.py
+          python3 .github/scripts/validate_security_evidence_selfcheck.py
 
   codeql_source:
     name: CodeQL source stack
