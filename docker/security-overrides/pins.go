@@ -5,5 +5,6 @@ package securityoverrides
 
 import (
 	_ "golang.org/x/crypto/cryptobyte"
+	_ "golang.org/x/net/http2"
 	_ "google.golang.org/grpc/codes"
 )
