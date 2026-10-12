@@ -18,8 +18,8 @@ INDIRECT_REQUIRE_RE = re.compile(rf"^require\s+([^\s]+)\s+({VERSION})\s+//\s*ind
 BLOCK_REQUIRE_RE = re.compile(rf"^([^\s]+)\s+({VERSION})\s*$")
 INDIRECT_BLOCK_REQUIRE_RE = re.compile(rf"^([^\s]+)\s+({VERSION})\s+//\s*indirect\s*$")
 PIN_IMPORT_RE = re.compile(r'^\s*_\s+"([^"]+)"\s*$')
-EXPECTED_OVERRIDES = {"golang.org/x/crypto", "google.golang.org/grpc"}
-EXPECTED_PIN_IMPORTS = {"golang.org/x/crypto/cryptobyte", "google.golang.org/grpc/codes"}
+EXPECTED_OVERRIDES = {"golang.org/x/crypto", "golang.org/x/net", "google.golang.org/grpc"}
+EXPECTED_PIN_IMPORTS = {"golang.org/x/crypto/cryptobyte", "golang.org/x/net/http2", "google.golang.org/grpc/codes"}
 TRUST_STORE_COPY = (
     "COPY --from=builder /etc/ssl/certs/ca-certificates.crt "
     "/etc/ssl/certs/ca-certificates.crt"
@@ -101,6 +101,7 @@ go 1.26.0
 
 require (
     golang.org/x/crypto v0.56.0
+    golang.org/x/net v0.59.0
     google.golang.org/grpc v1.83.2
     golang.org/x/sys v0.47.0 // indirect
 )
@@ -110,6 +111,7 @@ require (
         return False
     if parsed.direct != {
         "golang.org/x/crypto": "v0.56.0",
+        "golang.org/x/net": "v0.59.0",
         "google.golang.org/grpc": "v1.83.2",
     }:
         return False
@@ -226,7 +228,7 @@ def main() -> int:
         override_manifest = parse_overrides(SECURITY_OVERRIDE_MOD.read_text(encoding="utf-8"))
         if override_manifest is None:
             errors.append(
-                "security override module must contain exactly the allowlisted direct x/crypto and grpc "
+                "security override module must contain exactly the allowlisted direct x/crypto, x/net and grpc "
                 "semantic-version pins; additional requirements are permitted only as valid // indirect metadata"
             )
 
@@ -235,12 +237,12 @@ def main() -> int:
     else:
         pin_imports = parse_pin_imports(SECURITY_OVERRIDE_PINS.read_text(encoding="utf-8"))
         if pin_imports != EXPECTED_PIN_IMPORTS:
-            errors.append("security override anchors must contain exactly the approved x/crypto and grpc package imports")
+            errors.append("security override anchors must contain exactly the approved x/crypto, x/net and grpc package imports")
 
     required_override_tokens = (
         "COPY docker/security-overrides/go.mod /tmp/k6-security-overrides.mod",
-        "test \"$(wc -l < /tmp/k6-security-overrides.txt)\" -eq 2",
-        "golang.org/x/crypto|google.golang.org/grpc",
+        "test \"$(wc -l < /tmp/k6-security-overrides.txt)\" -eq 3",
+        "golang.org/x/crypto|golang.org/x/net|google.golang.org/grpc",
         'GOFLAGS=-mod=mod go get "${MODULE}@${VERSION}"',
         "GOFLAGS=-mod=mod go list -m -f '{{.Version}}'",
         "go mod vendor",
