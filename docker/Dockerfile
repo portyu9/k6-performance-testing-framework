@@ -6,7 +6,7 @@ ARG K6_COMMIT=e0887846143ab176d4b5483c9d52cf3b3e009f1a
 # overrides can be applied without losing exact upstream release provenance.
 FROM grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34 AS upstream-release
 
-FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine3.24@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine3.24@sha256:738d1cf061836894ff6bb8c33881080ac66de8cf0586615012a0c8f592649cfa AS builder
 ARG K6_VERSION
 ARG K6_COMMIT
 ARG TARGETOS
@@ -31,10 +31,10 @@ RUN awk ' \
       in_require && $1 == ")" { in_require = 0; next } \
       in_require && NF == 2 { print $1, $2 } \
     ' /tmp/k6-security-overrides.mod > /tmp/k6-security-overrides.txt \
-    && test "$(wc -l < /tmp/k6-security-overrides.txt)" -eq 2 \
+    && test "$(wc -l < /tmp/k6-security-overrides.txt)" -eq 3 \
     && while read -r MODULE VERSION; do \
          case "${MODULE}" in \
-           golang.org/x/crypto|google.golang.org/grpc) GOFLAGS=-mod=mod go get "${MODULE}@${VERSION}" ;; \
+           golang.org/x/crypto|golang.org/x/net|google.golang.org/grpc) GOFLAGS=-mod=mod go get "${MODULE}@${VERSION}" ;; \
            *) echo "unsupported security override: ${MODULE}" >&2; exit 1 ;; \
          esac; \
        done < /tmp/k6-security-overrides.txt \
