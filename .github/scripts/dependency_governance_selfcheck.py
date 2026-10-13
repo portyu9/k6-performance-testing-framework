@@ -286,7 +286,7 @@ def check_go_refusal() -> None:
     assert not result['eligible']
     assert any('indirect Go dependency' in reason for reason in result['reasons'])
     # An unexpected direct dependency is never authorized by updated versions.
-    api.files[(path,HEAD)] = go_model(x_crypto='0.55.1') + 'require example.com/unexpected v1.0.0\\n'
+    api.files[(path,HEAD)] = go_model(x_crypto='0.55.1') + 'require example.com/unexpected v1.0.0\n'
     result = gov.validate_go_override(
         api, BASE, HEAD, [{'filename': path}],
         go_metadata(('golang.org/x/crypto','0.55.1','version-update:semver-patch')), CONFIG)
