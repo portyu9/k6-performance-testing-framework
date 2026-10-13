@@ -279,6 +279,37 @@ def check_go_refusal() -> None:
         go_metadata(('golang.org/x/crypto','0.55.1','version-update:semver-patch')),CONFIG)
     assert result['eligible'], result['reasons']
 
+def check_current_go_override_update() -> None:
+    """Regression: exact production-style x/crypto bump with Go transitive updates."""
+    path = 'docker/security-overrides/go.mod'
+    base = go_model(x_crypto='0.57.0').replace(
+        '\tgoogle.golang.org/grpc v1.83.0',
+        '\tgolang.org/x/net v0.60.0\n\tgoogle.golang.org/grpc v1.83.0',
+    ).replace('google.golang.org/grpc v1.83.0', 'google.golang.org/grpc v1.84.0')
+    head = base.replace('golang.org/x/crypto v0.57.0', 'golang.org/x/crypto v0.58.0')
+    head = head.replace(
+        'require golang.org/x/sys v0.48.0 // indirect',
+        'require (\n\tgolang.org/x/sys v0.49.0 // indirect\n\tgolang.org/x/text v0.43.0 // indirect\n)',
+    )
+    api = FakeApi({(path, BASE): base, (path, HEAD): head})
+    result = gov.validate_go_override(
+        api, BASE, HEAD, [{'filename': path}],
+        go_metadata(('golang.org/x/crypto', '0.58.0', 'version-update:semver-minor')), CONFIG)
+    assert result['eligible'], result['reasons']
+    assert result['changes'] == [{
+        'dependency': 'golang.org/x/crypto', 'from': 'v0.57.0', 'to': 'v0.58.0',
+    }]
+
+    api.files[(path, HEAD)] = base.replace('golang.org/x/sys v0.48.0', 'golang.org/x/sys v0.49.0')
+    indirect_metadata = [{
+        'name': 'golang.org/x/sys', 'version': '0.49.0',
+        'dependencyType': 'indirect:production', 'updateType': 'version-update:semver-minor',
+    }]
+    result = gov.validate_go_override(
+        api, BASE, HEAD, [{'filename': path}], indirect_metadata, CONFIG)
+    assert result['eligible'], result['reasons']
+
+
 def check_owner_identity_review_and_refresh() -> None:
     good = OwnerApi(CONFIG['ownerApprovalLogin'], CONFIG['ownerApprovalUserId'])
     assessment = owner_assessment()
@@ -458,7 +489,7 @@ def check_workflow_boundary() -> None:
 
 CHECKS=[
     check_config,check_parsers,check_metadata,check_classification,check_provenance,
-    check_spoofing,check_go_patch,check_grpc_security_patch,check_go_refusal,
+    check_spoofing,check_go_patch,check_grpc_security_patch,check_go_refusal,check_current_go_override_update,
     check_owner_identity_review_and_refresh,check_action_patch,check_action_refusal,check_docker_semantics,check_run_identity,check_qualification,
     check_targets,check_workflow_boundary,
 ]
