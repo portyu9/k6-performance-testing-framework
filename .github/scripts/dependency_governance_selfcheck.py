@@ -186,8 +186,8 @@ def check_config() -> None:
     assert gov.validate_config(CONFIG) == []
     broken = deepcopy(CONFIG); broken['allowedGoOverrideUpdateTypes'].append('version-update:semver-major')
     assert any('major' in reason for reason in gov.validate_config(broken))
-    broken = deepcopy(CONFIG); broken['ecosystems']['gomod-security-override']['dependencies'].append('golang.org/x/crypto')
-    assert any('unique' in reason for reason in gov.validate_config(broken))
+    broken = deepcopy(CONFIG); broken['ecosystems']['gomod-security-override']['dependencies'] = ['golang.org/x/crypto']
+    assert any('trusted base go.mod' in reason for reason in gov.validate_config(broken))
     broken = deepcopy(CONFIG); broken['ecosystems']['docker']['mode'] = 'manual'
     assert any('qualified autonomous' in reason for reason in gov.validate_config(broken))
     broken = deepcopy(CONFIG); broken['ownerApprovalRequired'] = False
