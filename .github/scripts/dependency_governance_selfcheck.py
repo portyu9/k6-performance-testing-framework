@@ -278,6 +278,20 @@ def check_go_refusal() -> None:
         api,BASE,HEAD,[{'filename':path}],
         go_metadata(('golang.org/x/crypto','0.55.1','version-update:semver-patch')),CONFIG)
     assert result['eligible'], result['reasons']
+    # Unrelated indirect downgrades must still fail, even on a signed update.
+    api.files[(path,HEAD)] = go_model(x_crypto='0.55.1', indirect='0.47.0')
+    result = gov.validate_go_override(
+        api, BASE, HEAD, [{'filename': path}],
+        go_metadata(('golang.org/x/crypto','0.55.1','version-update:semver-patch')), CONFIG)
+    assert not result['eligible']
+    assert any('indirect Go dependency' in reason for reason in result['reasons'])
+    # An unexpected direct dependency is never authorized by updated versions.
+    api.files[(path,HEAD)] = go_model(x_crypto='0.55.1') + 'require example.com/unexpected v1.0.0\\n'
+    result = gov.validate_go_override(
+        api, BASE, HEAD, [{'filename': path}],
+        go_metadata(('golang.org/x/crypto','0.55.1','version-update:semver-patch')), CONFIG)
+    assert not result['eligible']
+    assert any('direct Go dependency set' in reason for reason in result['reasons'])
 
 def check_current_go_override_update() -> None:
     """Regression: exact production-style x/crypto bump with Go transitive updates."""
