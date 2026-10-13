@@ -240,14 +240,8 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         files = gomod.get("files")
         if not isinstance(files, list) or "docker/security-overrides/go.mod" not in files:
             errors.append("gomod-security-override must include its go.mod")
-        dependencies = gomod.get("dependencies")
-        if (
-            not isinstance(dependencies, list)
-            or not dependencies
-            or not all(nonempty(value) for value in dependencies)
-            or len(set(dependencies)) != len(dependencies)
-        ):
-            errors.append("gomod-security-override dependencies must be a unique non-empty string list")
+        if "dependencies" in gomod:
+            errors.append("gomod-security-override must derive direct dependencies from the trusted base go.mod")
         if not nonempty(gomod.get("module")):
             errors.append("gomod-security-override module must be non-empty")
 
