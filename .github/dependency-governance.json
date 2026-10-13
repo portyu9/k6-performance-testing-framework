@@ -96,10 +96,6 @@
         "docker/security-overrides/go.mod",
         "docker/security-overrides/go.sum"
       ],
-      "dependencies": [
-        "golang.org/x/crypto",
-        "google.golang.org/grpc"
-      ],
       "module": "github.com/portyu9/k6-performance-testing-framework/docker/security-overrides"
     },
     "github-actions": {

@@ -19,10 +19,6 @@ def parse_override_go_mod(
     indirect_versions: dict[str, str] = {}
     seen_modules: set[str] = set()
     in_require_block = False
-    dependencies = {
-        str(value) for value in config["ecosystems"]["gomod-security-override"]["dependencies"]
-    }
-
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("//"):
@@ -56,6 +52,8 @@ def parse_override_go_mod(
         if len(parts) not in {2, 4}:
             return None
         name, version = parts[0], parts[1]
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+", name):
+            return None
         indirect = len(parts) == 4 and parts[2:] == ["//", "indirect"]
         if len(parts) == 4 and not indirect:
             return None
@@ -65,16 +63,12 @@ def parse_override_go_mod(
             return None
         seen_modules.add(name)
         if indirect:
-            if name in dependencies:
-                return None
             indirect_versions[name] = version
             continue
-        if name not in dependencies:
-            return None
         versions[name] = version
 
     expected_module = str(config["ecosystems"]["gomod-security-override"]["module"])
-    if in_require_block or module != expected_module or not go_version or set(versions) != dependencies:
+    if in_require_block or module != expected_module or not go_version or not versions:
         return None
     return module, go_version, versions, indirect_versions
 
@@ -110,28 +104,42 @@ def validate_go_override(
         return {"eligible": False, "reasons": unique(reasons), "changes": []}
     if base_model[:2] != head_model[:2]:
         reasons.append("module path and Go language version must remain unchanged")
-    if base_model[3] != head_model[3]:
-        reasons.append("indirect Go module metadata must remain unchanged in autonomous override updates")
 
-    dependencies = [str(value) for value in policy["dependencies"]]
-    changes: list[dict[str, str]] = []
-    for dependency in dependencies:
-        old_text = base_model[2][dependency]
-        new_text = head_model[2][dependency]
+    # The accepted base manifest is the dependency authority. New direct module
+    # names are not implicitly granted authority by a Dependabot PR.
+    base_direct, head_direct = base_model[2], head_model[2]
+    if set(base_direct) != set(head_direct):
+        reasons.append("direct Go dependency set must remain unchanged")
+
+    base_indirect, head_indirect = base_model[3], head_model[3]
+    indirect_changes: dict[str, dict[str, str]] = {}
+    for dependency in sorted(set(base_indirect) & set(head_indirect)):
+        old_text = base_indirect[dependency]
+        new_text = head_indirect[dependency]
         if old_text == new_text:
             continue
-        old_version = semver_tuple(old_text)
-        new_version = semver_tuple(new_text)
-        if not old_version or not new_version:
-            reasons.append(f"{dependency} override versions must be strict semantic versions")
-        elif new_version[0] != old_version[0] or new_version <= old_version:
+        old_version, new_version = semver_tuple(old_text), semver_tuple(new_text)
+        if not old_version or not new_version or new_version[0] != old_version[0] or new_version <= old_version:
             reasons.append(
-                f"{dependency} autonomous security override updates must increase within the same major line"
+                f"{dependency} indirect Go dependency must increase within the same major line"
+            )
+        indirect_changes[dependency] = {"dependency": dependency, "from": old_text, "to": new_text}
+
+    # Indirect additions/removals are legitimate outputs of Go module graph
+    # recalculation. They do not authorize a new direct dependency or changes
+    # to non-go.mod/go.sum paths; signed source provenance and the required
+    # security / CI qualification remain mandatory.
+    changes: list[dict[str, str]] = []
+    for dependency in sorted(set(base_direct) & set(head_direct)):
+        old_text, new_text = base_direct[dependency], head_direct[dependency]
+        if old_text == new_text:
+            continue
+        old_version, new_version = semver_tuple(old_text), semver_tuple(new_text)
+        if not old_version or not new_version or new_version[0] != old_version[0] or new_version <= old_version:
+            reasons.append(
+                f"{dependency} direct Go dependency must increase within the same major line"
             )
         changes.append({"dependency": dependency, "from": old_text, "to": new_text})
-
-    if not changes:
-        reasons.append("Go security override PR does not change an allowlisted dependency version")
 
     metadata_by_name: dict[str, dict[str, str]] = {}
     for item in metadata:
@@ -140,23 +148,28 @@ def validate_go_override(
             reasons.append("signed Go override metadata contains missing or duplicate dependency names")
             continue
         metadata_by_name[name] = item
-    changed_dependencies = {change["dependency"] for change in changes}
-    if set(metadata_by_name) != changed_dependencies:
-        reasons.append("signed Go override metadata does not exactly match changed dependencies")
-    for change in changes:
-        dependency = change["dependency"]
-        item = metadata_by_name.get(dependency)
-        if not item:
+
+    direct_changes = {change["dependency"]: change for change in changes}
+    # An indirect-only Dependabot update must be able to qualify as well.
+    signable_changes = {**indirect_changes, **direct_changes}
+    if not metadata_by_name or not set(direct_changes).issubset(metadata_by_name) or not set(metadata_by_name).issubset(signable_changes):
+        reasons.append("signed Go override metadata does not describe the changed dependencies")
+    if not changes and not indirect_changes:
+        reasons.append("Go override PR does not change a dependency version")
+
+    for dependency, item in metadata_by_name.items():
+        change = signable_changes.get(dependency)
+        if not change:
             continue
-        if item.get("dependencyType") != "direct:production":
-            reasons.append(f"{dependency} signed dependency type must be direct:production")
+        expected_type = "direct:production" if dependency in direct_changes else "indirect:production"
+        if item.get("dependencyType") != expected_type:
+            reasons.append(f"{dependency} signed dependency type must be {expected_type}")
         update_type = str(item.get("updateType") or "")
         if update_type not in config["allowedGoOverrideUpdateTypes"]:
             reasons.append(
                 f"{dependency} Go override update type {update_type or 'unknown'} is not autonomous"
             )
-        old_version = semver_tuple(change["from"])
-        new_version = semver_tuple(change["to"])
+        old_version, new_version = semver_tuple(change["from"]), semver_tuple(change["to"])
         if old_version and new_version:
             if "semver-patch" in update_type and new_version[:2] != old_version[:2]:
                 reasons.append(f"{dependency} signed patch metadata does not describe a patch-only change")
