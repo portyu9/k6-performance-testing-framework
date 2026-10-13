@@ -84,12 +84,7 @@
         "docker/Dockerfile"
       ],
       "mode": "qualified",
-      "dependencies": [
-        "grafana/k6",
-        "golang",
-        "alpine"
-      ],
-      "reason": "Canonical Dependabot Docker updates are autonomous only when the diff is restricted to one-for-one immutable FROM reference replacements, signed dependency metadata matches the new tag, no major line is crossed, and every exact-head CI/Extended/Security/Docs gate passes."
+      "reason": "Canonical signed Dependabot Docker changes must preserve each existing image identity, platform/stage aliases, immutable digest and strict FROM replacement shape; derive eligible image names from the accepted Dockerfile diff rather than hardcoded package names. Every exact-head CI/Extended/Security/Docs and owner approval gate remains mandatory."
     },
     "gomod-security-override": {
       "files": [

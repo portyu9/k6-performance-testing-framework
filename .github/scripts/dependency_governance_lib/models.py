@@ -223,13 +223,8 @@ def validate_config(config: dict[str, Any]) -> list[str]:
     else:
         if docker.get("files") != ["docker/Dockerfile"]:
             errors.append("docker files must be exactly ['docker/Dockerfile']")
-        dependencies = docker.get("dependencies")
-        if (
-            not isinstance(dependencies, list)
-            or sorted(dependencies) != ["alpine", "golang", "grafana/k6"]
-            or len(set(dependencies)) != 3
-        ):
-            errors.append("docker dependencies must be exactly alpine, golang, and grafana/k6")
+        if "dependencies" in docker:
+            errors.append("docker image authority must come from accepted FROM replacements, not a static allowlist")
         if not nonempty(docker.get("reason")):
             errors.append("docker qualification reason must be non-empty")
 

