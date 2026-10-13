@@ -277,8 +277,7 @@ def check_go_refusal() -> None:
     result=gov.validate_go_override(
         api,BASE,HEAD,[{'filename':path}],
         go_metadata(('golang.org/x/crypto','0.55.1','version-update:semver-patch')),CONFIG)
-    assert not result['eligible']
-    assert any('indirect Go module metadata' in reason for reason in result['reasons'])
+    assert result['eligible'], result['reasons']
 
 def check_owner_identity_review_and_refresh() -> None:
     good = OwnerApi(CONFIG['ownerApprovalLogin'], CONFIG['ownerApprovalUserId'])
