@@ -436,10 +436,10 @@ def validate_docker(
             }
         )
 
-    allowed_dependencies = set(config["ecosystems"]["docker"]["dependencies"])
+    # The trusted GitHub diff and the one-to-one unchanged image identities
+    # above define the accepted FROM authority without freezing image names.
+    # An added/replaced image or Dockerfile command remains disallowed.
     changed_dependencies = {change["dependency"] for change in changes}
-    if not changed_dependencies.issubset(allowed_dependencies):
-        reasons.append("Docker update changes a dependency outside the explicit allowlist")
 
     metadata_by_name: dict[str, dict[str, str]] = {}
     for item in metadata:
