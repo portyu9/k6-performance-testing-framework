@@ -72,6 +72,38 @@ def validate_local_links(text: str, errors: list[str]) -> None:
             fail(f"README local link target does not exist: {raw}", errors)
 
 
+def validate_pages_navigation(errors: list[str]) -> None:
+    """Keep Pages links inside the published docs root, or link to real repository files."""
+    index = ROOT / "docs" / "index.md"
+    examples = ROOT / "examples" / "README.md"
+    target = "https://github.com/portyu9/k6-performance-testing-framework/blob/main/examples/README.md"
+
+    if not index.is_file():
+        fail("GitHub Pages index is missing: docs/index.md", errors)
+        return
+    if not examples.is_file():
+        fail("GitHub Pages Examples target is missing: examples/README.md", errors)
+
+    content = index.read_text(encoding="utf-8")
+    if f"[Examples]({target})" not in content:
+        fail("GitHub Pages Start / Examples must link to the canonical repository examples index", errors)
+
+    for raw in LOCAL_LINK_RE.findall(content):
+        destination = unescape(raw.strip())
+        if not destination or destination.startswith("#"):
+            continue
+        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", destination) or destination.startswith("//"):
+            continue
+        destination = destination.split("#", 1)[0].split("?", 1)[0]
+        if not destination:
+            continue
+        candidate = (index.parent / unquote(destination)).resolve()
+        if not candidate.is_relative_to(index.parent):
+            fail(f"GitHub Pages navigation escapes the published docs root: {raw}", errors)
+        elif not candidate.is_file():
+            fail(f"GitHub Pages navigation target does not exist in docs/: {raw}", errors)
+
+
 def validate_workflow_badges(text: str, errors: list[str]) -> None:
     for name in WORKFLOW_BADGE_RE.findall(text):
         if not (ROOT / ".github" / "workflows" / name).is_file():
@@ -260,6 +292,7 @@ def main() -> int:
     text = README.read_text(encoding="utf-8")
     validate_runtime_provenance_docs(text, errors)
     validate_local_links(text, errors)
+    validate_pages_navigation(errors)
     validate_workflow_badges(text, errors)
     validate_badge_palette(text, errors)
     validate_mermaid(text, errors)
