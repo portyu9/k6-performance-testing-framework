@@ -19,7 +19,7 @@ A production-grade Grafana k6 framework for smoke, load, stress, and soak testin
 - [k6 in GitHub Actions](K6-GITHUB-ACTIONS.md)
 - [Thresholds vs checks](K6-THRESHOLDS-AND-CHECKS.md)
 - [Safe load testing](K6-LOAD-TEST-SAFETY.md)
-- [Examples](../examples/README.md)
+- [Examples](https://github.com/portyu9/k6-performance-testing-framework/blob/main/examples/README.md)
 
 ## Design position
 
