@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import urllib.parse
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .github import GitHubApi
@@ -10,6 +11,8 @@ from .qualification import fetch_assessment
 OWNER_REVIEW_MARKER = "<!-- dependency-owner-review:v1:"
 OWNER_APPROVAL_MARKER = "<!-- dependency-owner-approval:v1:"
 OWNER_REFRESH_MARKER = "<!-- dependency-owner-refresh:v2:"
+# Native Dependabot regeneration is a last resort after an ignored rebase.
+REBASE_RECREATE_LEASE = timedelta(hours=24)
 
 
 def verify_owner_identity(owner_api: GitHubApi | None, config: dict[str, Any]) -> dict[str, Any]:
@@ -163,8 +166,15 @@ def request_dependabot_refresh(
     number: int,
     assessment: Assessment,
     config: dict[str, Any],
+    *,
+    observed_at: datetime | None = None,
 ) -> str | None:
-    """Request native Dependabot regeneration only through the configured push-capable owner."""
+    """Bound native Dependabot regeneration to authenticated stale-head evidence.
+
+    Only the GitHub Dependabot service mutates its own source branch. An ignored
+    rebase can escalate once to a native recreate after a 24-hour lease; no
+    caller is granted a direct ref/commit mutation or a waived CI gate.
+    """
     stale = "Dependabot commit parent is not the current main SHA"
     if stale not in assessment.provenance.get("reasons", []):
         return None
@@ -172,24 +182,57 @@ def request_dependabot_refresh(
     assert owner_api is not None
     state = str(assessment.provenance.get("provenanceState") or "")
     command = "recreate" if state == "canonical-dependabot-plus-repair" else "rebase"
-    marker = f"{OWNER_REFRESH_MARKER}{assessment.head_sha}:{assessment.base_sha}:{command} -->"
     comments = owner_api.paginate(f"/issues/{number}/comments")
-    if any(
-        marker in str(comment.get("body") or "")
-        and (comment.get("user") or {}).get("login") == config["ownerApprovalLogin"]
-        and (comment.get("user") or {}).get("id") == config["ownerApprovalUserId"]
-        for comment in comments
-    ):
+    def marker_for(cmd: str) -> str:
+        return f"{OWNER_REFRESH_MARKER}{assessment.head_sha}:{assessment.base_sha}:{cmd} -->"
+
+    def valid_owner(comment: dict[str, Any]) -> bool:
+        return (
+            (comment.get("user") or {}).get("login") == config["ownerApprovalLogin"]
+            and (comment.get("user") or {}).get("id") == config["ownerApprovalUserId"]
+        )
+
+    def matching(cmd: str) -> list[dict[str, Any]]:
+        marker = marker_for(cmd)
+        return [
+            comment
+            for comment in comments
+            if marker in str(comment.get("body") or "") and valid_owner(comment)
+        ]
+
+    if command == "rebase":
+        previous = matching("rebase")
+        if len(previous) > 1:
+            raise GovernanceError("duplicate authenticated exact-head Dependabot rebase commands")
+        if previous:
+            now = observed_at if observed_at is not None else datetime.now(UTC)
+            if now.tzinfo is None:
+                raise GovernanceError("Dependabot recovery clock must be timezone-aware")
+            raw = previous[0].get("created_at")
+            try:
+                issued = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            except ValueError:
+                return "rebase"  # Unverifiable age must never grant recreate authority.
+            if issued.tzinfo is None or now - issued.astimezone(UTC) < REBASE_RECREATE_LEASE:
+                return "rebase"
+            command = "recreate"
+
+    if len(matching(command)) > 1:
+        raise GovernanceError("duplicate authenticated exact-head Dependabot refresh commands")
+    if matching(command):
         return command
     owner_api.post(
         f"/issues/{number}/comments",
         {
             "body": (
                 f"@dependabot {command}\n\n"
-                f"{marker}\n"
+                f"{marker_for(command)}\n"
                 "Requested by the configured push-capable repository owner because the exact "
-                "Dependabot source commit is no longer parented on current main. Qualification "
-                "restarts on the new exact head; no merge or security gate is bypassed."
+                "Dependabot source commit remains unparented on accepted main. "
+                "Recreate is permitted only after the same native rebase request aged "
+                "at least 24 hours without a new signed Dependabot head. "
+                "Qualification restarts against any new bot head; no merge, ref write "
+                "or security gate is bypassed."
             )
         },
     )
