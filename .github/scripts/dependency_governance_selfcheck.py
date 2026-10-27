@@ -373,6 +373,73 @@ def check_owner_identity_review_and_refresh() -> None:
     assert refresh_api.comments[-1]['user']['login'] == CONFIG['ownerApprovalLogin']
     assert '@dependabot rebase' in refresh_api.comments[-1]['body']
 
+    # A genuine owner command must not be escalated while younger than 24h.
+    marker = f'<!-- dependency-owner-refresh:v2:{HEAD}:{BASE}:rebase -->'
+    def with_rebase(*, timestamp: str, login: str | None = None) -> OwnerApi:
+        owner = OwnerApi(CONFIG['ownerApprovalLogin'], CONFIG['ownerApprovalUserId'])
+        owner.comments.append({
+            'id': 50,
+            'body': '@dependabot rebase\n' + marker,
+            'created_at': timestamp,
+            'user': {
+                'login': login or CONFIG['ownerApprovalLogin'],
+                'id': CONFIG['ownerApprovalUserId']
+                if login is None else 41898282,
+            },
+        })
+        return owner
+
+    fresh = with_rebase(timestamp='2026-09-01T19:00:00Z')
+    assert request_dependabot_refresh(
+        fresh, 17, owner_assessment(stale=True), CONFIG, observed_at=NOW
+    ) == 'rebase'
+    assert len(fresh.comments) == 1
+
+    # Native service did not update this exact signed source for 25h:
+    # request ONE native recreate, then never duplicate on later wakes.
+    expired = with_rebase(timestamp='2026-08-31T18:00:00Z')
+    stale = owner_assessment(stale=True)
+    assert request_dependabot_refresh(
+        expired, 17, stale, CONFIG, observed_at=NOW
+    ) == 'recreate'
+    assert len(expired.comments) == 2
+    assert '@dependabot recreate' in expired.comments[-1]['body']
+    assert f'<!-- dependency-owner-refresh:v2:{HEAD}:{BASE}:recreate -->' in expired.comments[-1]['body']
+    assert request_dependabot_refresh(
+        expired, 17, stale, CONFIG, observed_at=NOW
+    ) == 'recreate'
+    assert len(expired.comments) == 2
+
+    # No escalation from untrusted, undated, future-dated or cross-head proof.
+    for prior in (
+        with_rebase(timestamp='invalid-timestamp'),
+        with_rebase(timestamp='2026-09-02T20:00:00Z'),
+        with_rebase(timestamp='2026-08-31T18:00:00Z', login='github-actions[bot]'),
+    ):
+        assert request_dependabot_refresh(
+            prior, 17, stale, CONFIG, observed_at=NOW
+        ) == 'rebase'
+        assert not any('@dependabot recreate' in c['body'] for c in prior.comments)
+
+    wrong_head = with_rebase(timestamp='2026-08-31T18:00:00Z')
+    assert request_dependabot_refresh(
+        wrong_head, 17, owner_assessment(head=NEW, stale=True), CONFIG,
+        observed_at=NOW,
+    ) == 'rebase'
+    assert len(wrong_head.comments) == 2
+    assert not any('@dependabot recreate' in c['body'] for c in wrong_head.comments)
+
+    duplicated = with_rebase(timestamp='2026-08-31T18:00:00Z')
+    duplicated.comments.append(dict(duplicated.comments[0], id=51))
+    try:
+        request_dependabot_refresh(
+            duplicated, 17, stale, CONFIG, observed_at=NOW
+        )
+    except GovernanceError:
+        pass
+    else:
+        raise AssertionError('ambiguous native refresh escalation was accepted')
+
 
 def check_action_patch() -> None:
     result=gov.validate_actions([{'filename':'.github/workflows/ci.yml','patch':action_patch()}], [{'name':'actions/checkout','version':'7.0.1','updateType':'version-update:semver-patch'}], CONFIG)
