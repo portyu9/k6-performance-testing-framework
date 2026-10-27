@@ -183,18 +183,21 @@ def request_dependabot_refresh(
     state = str(assessment.provenance.get("provenanceState") or "")
     command = "recreate" if state == "canonical-dependabot-plus-repair" else "rebase"
     comments = owner_api.paginate(f"/issues/{number}/comments")
-    marker_for = lambda cmd: (
-        f"{OWNER_REFRESH_MARKER}{assessment.head_sha}:{assessment.base_sha}:{cmd} -->"
-    )
-    valid_owner = lambda comment: (
-        (comment.get("user") or {}).get("login") == config["ownerApprovalLogin"]
-        and (comment.get("user") or {}).get("id") == config["ownerApprovalUserId"]
-    )
+    def marker_for(cmd: str) -> str:
+        return f"{OWNER_REFRESH_MARKER}{assessment.head_sha}:{assessment.base_sha}:{cmd} -->"
+
+    def valid_owner(comment: dict[str, Any]) -> bool:
+        return (
+            (comment.get("user") or {}).get("login") == config["ownerApprovalLogin"]
+            and (comment.get("user") or {}).get("id") == config["ownerApprovalUserId"]
+        )
+
     def matching(cmd: str) -> list[dict[str, Any]]:
         marker = marker_for(cmd)
         return [
-            c for c in comments
-            if marker in str(c.get("body") or "") and valid_owner(c)
+            comment
+            for comment in comments
+            if marker in str(comment.get("body") or "") and valid_owner(comment)
         ]
 
     if command == "rebase":
