@@ -32,11 +32,6 @@ def target_pull_requests(
     if event_name == "workflow_dispatch":
         inputs = event.get("inputs") or {}
         return [parse_positive_integer(inputs.get("pr-number"), "workflow_dispatch pr-number")]
-    if event_name == "pull_request_target":
-        pull = event.get("pull_request") or {}
-        if (pull.get("user") or {}).get("login") != config["botLogin"]:
-            return []
-        return [parse_positive_integer(pull.get("number"), "pull_request_target PR number")]
     if event_name == "workflow_run":
         run = event.get("workflow_run") or {}
         if run.get("event") != "pull_request":
@@ -45,7 +40,7 @@ def target_pull_requests(
         if len(pulls) != 1:
             return []
         return [parse_positive_integer(pulls[0].get("number"), "workflow_run PR number")]
-    if event_name == "schedule":
+    if event_name in {"push", "schedule"}:
         pulls = api.paginate(f"/pulls?state=open&base={urllib.parse.quote(config['baseBranch'], safe='')}")
         return [
             int(pull["number"])
