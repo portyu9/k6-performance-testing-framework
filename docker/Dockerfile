@@ -6,7 +6,7 @@ ARG K6_COMMIT=e0887846143ab176d4b5483c9d52cf3b3e009f1a
 # overrides can be applied without losing exact upstream release provenance.
 FROM grafana/k6:2.3.0@sha256:2dd4756ec6e14e62778916e1eb850108e4b499304c02df56760fa0bdb0fba0b8 AS upstream-release
 
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.24@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.24@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18 AS builder
 ARG K6_VERSION
 ARG K6_COMMIT
 ARG TARGETOS
