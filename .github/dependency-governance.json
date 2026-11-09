@@ -13,6 +13,7 @@
   "statusCommentMarker": "<!-- dependency-governance:v1 -->",
   "maxChangedFiles": 25,
   "maxPullRequestAgeDays": 14,
+  "nativeRefreshEscalationMinutes": 30,
   "maxPaginationPages": 10,
   "manualReviewLabels": [
     "manual-review",

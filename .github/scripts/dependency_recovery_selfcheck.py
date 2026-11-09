@@ -315,7 +315,7 @@ class RecoverySelfCheck(unittest.TestCase):
                 else:
                     os.environ[name] = value
 
-    def test_wiring_requires_repair_rebase_recovery_and_hourly_reconciliation(self) -> None:
+    def test_wiring_requires_repair_rebase_recovery_and_bounded_reconciliation(self) -> None:
         dependabot = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "dependency-governance.yml").read_text(encoding="utf-8")
         self.assertEqual(dependabot.count("rebase-strategy: auto"), 3)
@@ -325,7 +325,9 @@ class RecoverySelfCheck(unittest.TestCase):
         self.assertIn("python .github/scripts/dependency_repair_selfcheck.py", workflow)
         self.assertIn("python .github/scripts/dependency_repair.py", workflow)
         self.assertIn("ALLOW_RECOVERY_RERUN:", workflow)
-        self.assertIn("cron: '17 * * * *'", workflow)
+        self.assertIn("cron: '7,17,27,37,47,57 * * * *'", workflow)
+        self.assertNotIn("pull_request_target:", workflow)
+        self.assertIn("Authenticate exact-current-main privileged wake", workflow)
         self.assertLess(workflow.index("Apply deterministic dependency repair"), workflow.index("Attempt bounded dependency recovery"))
         self.assertLess(workflow.index("Attempt bounded dependency recovery"), workflow.index("Reconcile dependency governance"))
         recovery_text = (SCRIPT_DIR / "dependency_recovery.py").read_text(encoding="utf-8")

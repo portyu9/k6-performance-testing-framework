@@ -137,6 +137,14 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         errors.append("ownerApprovalUserId must be a positive integer")
     if config.get("statusCommentMarker") != "<!-- dependency-governance:v1 -->":
         errors.append("statusCommentMarker must equal the v1 governance marker")
+    escalation = config.get("nativeRefreshEscalationMinutes")
+    if (
+        not isinstance(escalation, int)
+        or isinstance(escalation, bool)
+        or not 30 <= escalation <= 1440
+    ):
+        errors.append("nativeRefreshEscalationMinutes must be an integer from 30 to 1440")
+
 
     for key, maximum in (
         ("maxChangedFiles", 100),
