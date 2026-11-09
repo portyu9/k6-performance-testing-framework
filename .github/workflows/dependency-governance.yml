@@ -14,13 +14,13 @@ on:
       - '.github/scripts/dependency_repair.py'
       - '.github/scripts/dependency_repair_selfcheck.py'
       - '.github/workflows/dependency-governance.yml'
-  pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+  push:
+    branches: [main]
   workflow_run:
     workflows: [ci, extended, security, docs]
     types: [completed]
   schedule:
-    - cron: '17 * * * *'
+    - cron: '7,17,27,37,47,57 * * * *'
   workflow_dispatch:
     inputs:
       pr-number:
@@ -86,7 +86,15 @@ jobs:
 
   govern:
     name: govern-dependabot
-    if: github.event_name != 'pull_request'
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main' &&
+      github.event.repository.default_branch == 'main' &&
+      (github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -95,6 +103,36 @@ jobs:
       issues: write
       pull-requests: write
     steps:
+      - name: Authenticate exact-current-main privileged wake
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/dependency-governance.yml@refs/heads/main"
+          live_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          test "$live_main" = "$GITHUB_SHA"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_run" ]]; then
+            run_id="$(jq -er '.workflow_run.id' "$GITHUB_EVENT_PATH")"
+            [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
+            # Canonical REST provenance: a webhook is merely a wake hint,
+            # never an authorization credential or a substitute for CI gates.
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" |
+              jq -e --arg repo "$GITHUB_REPOSITORY" '
+                .repository.full_name == $repo and
+                .head_repository.full_name == $repo and
+                .event == "pull_request" and
+                .status == "completed" and .conclusion == "success" and
+                (.head_branch | startswith("dependabot/")) and
+                (
+                  (.name == "ci" and .path == ".github/workflows/ci.yml") or
+                  (.name == "extended" and .path == ".github/workflows/extended.yml") or
+                  (.name == "security" and .path == ".github/workflows/security.yml") or
+                  (.name == "docs" and .path == ".github/workflows/docs.yml")
+                )
+              ' >/dev/null
+          fi
       - name: Checkout trusted default-branch governance code only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -118,6 +156,7 @@ jobs:
           WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || '' }}
         run: python .github/scripts/dependency_repair.py
       - name: Attempt bounded dependency recovery
+        if: github.event_name != 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RECOVERY_EVENT_NAME: ${{ github.event_name }}
@@ -129,5 +168,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPENDABOT_OWNER_TOKEN: ${{ secrets.DEPENDABOT_OWNER_TOKEN }}
-          ALLOW_MERGE: ${{ github.event_name == 'workflow_run' || github.event_name == 'schedule' || inputs['allow-merge'] }}
+          ALLOW_MERGE: ${{ github.event_name == 'workflow_run' || github.event_name == 'schedule' || github.event_name == 'push' || inputs['allow-merge'] }}
         run: python .github/scripts/dependency_governance.py
