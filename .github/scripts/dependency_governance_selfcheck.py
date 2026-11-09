@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -196,6 +198,13 @@ def check_config() -> None:
     assert any('ownerApprovalRequired' in reason for reason in gov.validate_config(broken))
     broken = deepcopy(CONFIG); broken['ownerApprovalUserId'] = 0
     assert any('ownerApprovalUserId' in reason for reason in gov.validate_config(broken))
+    for invalid in (None, False, 0, 29, 1441, "30"):
+        broken = deepcopy(CONFIG)
+        broken['nativeRefreshEscalationMinutes'] = invalid
+        assert any(
+            'nativeRefreshEscalationMinutes' in reason
+            for reason in gov.validate_config(broken)
+        ), f'unsafe native recovery bound accepted: {invalid!r}'
 
 def check_parsers() -> None:
     assert gov.parse_positive_integer('42', 'pr') == 42 and gov.parse_bool('true') and not gov.parse_bool('false')
@@ -373,7 +382,11 @@ def check_owner_identity_review_and_refresh() -> None:
     assert refresh_api.comments[-1]['user']['login'] == CONFIG['ownerApprovalLogin']
     assert '@dependabot rebase' in refresh_api.comments[-1]['body']
 
-    # A genuine owner command must not be escalated while younger than 24h.
+    # Recovery boundary fixtures derive from the actual validated policy,
+    # not a legacy 24-hour constant or any hardcoded PR/alert target.
+    lease = timedelta(minutes=CONFIG['nativeRefreshEscalationMinutes'])
+    def timestamp_before(minutes: int = 0, seconds: int = 0) -> str:
+        return (NOW - timedelta(minutes=minutes, seconds=seconds)).isoformat().replace('+00:00', 'Z')
     marker = f'<!-- dependency-owner-refresh:v2:{HEAD}:{BASE}:rebase -->'
     def with_rebase(*, timestamp: str, login: str | None = None) -> OwnerApi:
         owner = OwnerApi(CONFIG['ownerApprovalLogin'], CONFIG['ownerApprovalUserId'])
@@ -389,15 +402,17 @@ def check_owner_identity_review_and_refresh() -> None:
         })
         return owner
 
-    fresh = with_rebase(timestamp='2026-09-01T19:00:00Z')
+    fresh = with_rebase(
+        timestamp=(NOW - lease + timedelta(seconds=1)).isoformat().replace('+00:00', 'Z')
+    )
     assert request_dependabot_refresh(
         fresh, 17, owner_assessment(stale=True), CONFIG, observed_at=NOW
     ) == 'rebase'
     assert len(fresh.comments) == 1
 
-    # Native service did not update this exact signed source for 25h:
-    # request ONE native recreate, then never duplicate on later wakes.
-    expired = with_rebase(timestamp='2026-08-31T18:00:00Z')
+    # An ignored native rebase reaches the precise acceptance boundary.
+    # Request ONE native recreate, then never duplicate on later wakes.
+    expired = with_rebase(timestamp=(NOW - lease).isoformat().replace('+00:00', 'Z'))
     stale = owner_assessment(stale=True)
     assert request_dependabot_refresh(
         expired, 17, stale, CONFIG, observed_at=NOW
@@ -413,15 +428,26 @@ def check_owner_identity_review_and_refresh() -> None:
     # No escalation from untrusted, undated, future-dated or cross-head proof.
     for prior in (
         with_rebase(timestamp='invalid-timestamp'),
-        with_rebase(timestamp='2026-09-02T20:00:00Z'),
-        with_rebase(timestamp='2026-08-31T18:00:00Z', login='github-actions[bot]'),
+        with_rebase(timestamp=(NOW + timedelta(minutes=1)).isoformat().replace('+00:00', 'Z')),
+        with_rebase(timestamp=(NOW - lease - timedelta(minutes=1)).isoformat().replace('+00:00', 'Z'), login='github-actions[bot]'),
     ):
         assert request_dependabot_refresh(
             prior, 17, stale, CONFIG, observed_at=NOW
         ) == 'rebase'
         assert not any('@dependabot recreate' in c['body'] for c in prior.comments)
 
-    wrong_head = with_rebase(timestamp='2026-08-31T18:00:00Z')
+    # A forged application-attributed owner-looking comment must never
+    # grant escalation even if its login and numeric user ID are identical.
+    forged = with_rebase(
+        timestamp=(NOW - lease - timedelta(minutes=1)).isoformat().replace('+00:00', 'Z')
+    )
+    forged.comments[0]['performed_via_github_app'] = {'slug': 'untrusted-app'}
+    assert request_dependabot_refresh(
+        forged, 17, stale, CONFIG, observed_at=NOW
+    ) == 'rebase'
+    assert not any('@dependabot recreate' in c['body'] for c in forged.comments)
+
+    wrong_head = with_rebase(timestamp=(NOW - lease - timedelta(minutes=1)).isoformat().replace('+00:00', 'Z'))
     assert request_dependabot_refresh(
         wrong_head, 17, owner_assessment(head=NEW, stale=True), CONFIG,
         observed_at=NOW,
@@ -429,7 +455,7 @@ def check_owner_identity_review_and_refresh() -> None:
     assert len(wrong_head.comments) == 2
     assert not any('@dependabot recreate' in c['body'] for c in wrong_head.comments)
 
-    duplicated = with_rebase(timestamp='2026-08-31T18:00:00Z')
+    duplicated = with_rebase(timestamp=(NOW - lease - timedelta(minutes=1)).isoformat().replace('+00:00', 'Z'))
     duplicated.comments.append(dict(duplicated.comments[0], id=51))
     try:
         request_dependabot_refresh(
@@ -565,6 +591,7 @@ def check_qualification() -> None:
 def check_targets() -> None:
     api=FakeApi(pulls=[{'number':1,'user':{'login':'dependabot[bot]'}},{'number':2,'user':{'login':'human'}},{'number':3,'user':{'login':'dependabot[bot]'}}])
     assert gov.target_pull_requests(api,'schedule',{},CONFIG) == [1,3]
+    assert gov.target_pull_requests(api,'push',{},CONFIG) == [1,3]
     assert gov.target_pull_requests(api,'workflow_dispatch',{'inputs':{'pr-number':'7'}},CONFIG) == [7]
     try: gov.target_pull_requests(api,'workflow_dispatch',{'inputs':{'pr-number':'7x'}},CONFIG)
     except gov.GovernanceError: pass
@@ -574,12 +601,24 @@ def check_targets() -> None:
 def check_workflow_boundary() -> None:
     assert 'ref: ${{ github.event.repository.default_branch }}' in WORKFLOW
     assert 'persist-credentials: false' in WORKFLOW
-    assert "if: github.event_name != 'pull_request'" in WORKFLOW
-    assert 'pull_request_target:' in WORKFLOW and 'workflow_run:' in WORKFLOW
+    assert "github.event_name != 'pull_request' &&" in WORKFLOW
+    assert not re.search(r'(?m)^\s*pull_request_target:', WORKFLOW)
+    assert 'workflow_run:' in WORKFLOW and 'push:' in WORKFLOW
+    assert "github.ref == 'refs/heads/main'" in WORKFLOW
+    assert "cron: '7,17,27,37,47,57 * * * *'" in WORKFLOW
+    assert 'Authenticate exact-current-main privileged wake' in WORKFLOW
+    assert 'test "$live_main" = "$GITHUB_SHA"' in WORKFLOW
+    assert 'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}"' in WORKFLOW
+    assert 'github.event.workflow_run.conclusion == \'success\'' in WORKFLOW
+    assert 'github.event.workflow_run.head_repository.full_name == github.repository' in WORKFLOW
+    assert WORKFLOW.index('Authenticate exact-current-main privileged wake') < WORKFLOW.index('Checkout trusted default-branch governance code only')
+    assert WORKFLOW.index('Checkout trusted default-branch governance code only') < WORKFLOW.index('DEPENDABOT_OWNER_TOKEN:')
     assert "- '.github/scripts/dependency_governance_lib/**'" in WORKFLOW
     assert "- '.github/scripts/dependency_repair.py'" in WORKFLOW
-    assert "cron: '17 * * * *'" in WORKFLOW
+    assert "cron: '7,17,27,37,47,57 * * * *'" in WORKFLOW
     assert 'Apply deterministic dependency repair' in WORKFLOW
+    assert "if: github.event_name != 'push'" in WORKFLOW
+    assert "github.event_name == 'push' || inputs['allow-merge']" in WORKFLOW
     owner_secret = 'DEPENDABOT_OWNER_TOKEN: ${{ secrets.DEPENDABOT_OWNER_TOKEN }}'
     assert WORKFLOW.count(owner_secret) == 2
     repair_block = WORKFLOW[
