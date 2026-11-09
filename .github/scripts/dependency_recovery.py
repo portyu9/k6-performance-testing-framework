@@ -654,7 +654,7 @@ def main() -> int:
     token = os.environ.get("GITHUB_TOKEN", "")
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     event_name = os.environ.get("RECOVERY_EVENT_NAME", os.environ.get("GITHUB_EVENT_NAME", "")).strip()
-    if event_name not in {"pull_request_target", "workflow_run", "schedule", "workflow_dispatch"}:
+    if event_name not in {"workflow_run", "schedule", "workflow_dispatch"}:
         raise GovernanceError(f"unsupported recovery event: {event_name or 'missing'}")
     api = GitHubApi(token, repository, governance_config["maxPaginationPages"])
     allow_rerun = os.environ.get("ALLOW_RECOVERY_RERUN", "false").strip().lower() == "true"
