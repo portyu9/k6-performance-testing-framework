@@ -599,11 +599,12 @@ def check_targets() -> None:
 def check_authenticated_workflow_run_filter() -> None:
     # Exercise the actual jq policy extracted from the privileged workflow,
     # not a separately approximated Python authorization rule.
-    marker = 'jq -e --arg repo "$GITHUB_REPOSITORY" \\''
+    marker = "jq -e --arg repo \"$GITHUB_REPOSITORY\" '"
     assert WORKFLOW.count(marker) == 1
     fragment = WORKFLOW.split(marker, 1)[1]
-    assert "\\n              ' >/dev/null" in fragment
-    policy = fragment.split("\\n              ' >/dev/null", 1)[0]
+    terminator = "\n              ' >/dev/null"
+    assert terminator in fragment
+    policy = fragment.split(terminator, 1)[0]
     for name, path in (
         ('ci', '.github/workflows/ci.yml'),
         ('extended', '.github/workflows/extended.yml'),
