@@ -11,8 +11,7 @@ from .qualification import fetch_assessment
 OWNER_REVIEW_MARKER = "<!-- dependency-owner-review:v1:"
 OWNER_APPROVAL_MARKER = "<!-- dependency-owner-approval:v1:"
 OWNER_REFRESH_MARKER = "<!-- dependency-owner-refresh:v2:"
-# Native Dependabot regeneration is a last resort after an ignored rebase.
-REBASE_RECREATE_LEASE = timedelta(hours=24)
+# Native Dependabot regeneration is bounded by validated declarative policy.
 
 
 def verify_owner_identity(owner_api: GitHubApi | None, config: dict[str, Any]) -> dict[str, Any]:
@@ -172,8 +171,8 @@ def request_dependabot_refresh(
     """Bound native Dependabot regeneration to authenticated stale-head evidence.
 
     Only the GitHub Dependabot service mutates its own source branch. An ignored
-    rebase can escalate once to a native recreate after a 24-hour lease; no
-    caller is granted a direct ref/commit mutation or a waived CI gate.
+    rebase can escalate once to a native recreate after the configured bounded
+    interval; no caller can mutate a bot ref or waive any qualification gate.
     """
     stale = "Dependabot commit parent is not the current main SHA"
     if stale not in assessment.provenance.get("reasons", []):
@@ -213,7 +212,8 @@ def request_dependabot_refresh(
                 issued = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
             except ValueError:
                 return "rebase"  # Unverifiable age must never grant recreate authority.
-            if issued.tzinfo is None or now - issued.astimezone(UTC) < REBASE_RECREATE_LEASE:
+            lease = timedelta(minutes=config["nativeRefreshEscalationMinutes"])
+            if issued.tzinfo is None or now - issued.astimezone(UTC) < lease:
                 return "rebase"
             command = "recreate"
 
@@ -230,7 +230,8 @@ def request_dependabot_refresh(
                 "Requested by the configured push-capable repository owner because the exact "
                 "Dependabot source commit remains unparented on accepted main. "
                 "Recreate is permitted only after the same native rebase request aged "
-                "at least 24 hours without a new signed Dependabot head. "
+                f"at least {config['nativeRefreshEscalationMinutes']} minutes without a new "
+                "signed Dependabot head. "
                 "Qualification restarts against any new bot head; no merge, ref write "
                 "or security gate is bypassed."
             )
