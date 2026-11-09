@@ -189,6 +189,7 @@ def request_dependabot_refresh(
         return (
             (comment.get("user") or {}).get("login") == config["ownerApprovalLogin"]
             and (comment.get("user") or {}).get("id") == config["ownerApprovalUserId"]
+            and comment.get("performed_via_github_app") is None
         )
 
     def matching(cmd: str) -> list[dict[str, Any]]:
