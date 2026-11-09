@@ -385,8 +385,6 @@ def check_owner_identity_review_and_refresh() -> None:
     # Recovery boundary fixtures derive from the actual validated policy,
     # not a legacy 24-hour constant or any hardcoded PR/alert target.
     lease = timedelta(minutes=CONFIG['nativeRefreshEscalationMinutes'])
-    def timestamp_before(minutes: int = 0, seconds: int = 0) -> str:
-        return (NOW - timedelta(minutes=minutes, seconds=seconds)).isoformat().replace('+00:00', 'Z')
     marker = f'<!-- dependency-owner-refresh:v2:{HEAD}:{BASE}:rebase -->'
     def with_rebase(*, timestamp: str, login: str | None = None) -> OwnerApi:
         owner = OwnerApi(CONFIG['ownerApprovalLogin'], CONFIG['ownerApprovalUserId'])
@@ -598,6 +596,60 @@ def check_targets() -> None:
     else: raise AssertionError('unsafe dispatch input accepted')
 
 
+def check_authenticated_workflow_run_filter() -> None:
+    # Exercise the actual jq policy extracted from the privileged workflow,
+    # not a separately approximated Python authorization rule.
+    marker = 'jq -e --arg repo "$GITHUB_REPOSITORY" \\''
+    assert WORKFLOW.count(marker) == 1
+    fragment = WORKFLOW.split(marker, 1)[1]
+    assert "\\n              ' >/dev/null" in fragment
+    policy = fragment.split("\\n              ' >/dev/null", 1)[0]
+    for name, path in (
+        ('ci', '.github/workflows/ci.yml'),
+        ('extended', '.github/workflows/extended.yml'),
+        ('security', '.github/workflows/security.yml'),
+        ('docs', '.github/workflows/docs.yml'),
+    ):
+        canonical = {
+            'name': name,
+            'path': path,
+            'repository': {'full_name': REPO},
+            'head_repository': {'full_name': REPO},
+            'head_branch': 'dependabot/docker/docker/golang-signed',
+            'event': 'pull_request',
+            'status': 'completed',
+            'conclusion': 'success',
+        }
+        def allowed(run: dict[str, Any]) -> bool:
+            result = subprocess.run(
+                ['jq', '-e', '--arg', 'repo', REPO, policy],
+                input=json.dumps(run),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            return result.returncode == 0
+        assert allowed(canonical), f'canonical {name} workflow_run rejected'
+        for bad in (
+            {'repository': {'full_name': 'attacker/repo'}},
+            {'head_repository': {'full_name': 'attacker/repo'}},
+            {'head_repository': None},
+            {'name': 'spoofed-ci'},
+            {'path': '.github/workflows/fake.yml'},
+            {'event': 'push'},
+            {'status': 'in_progress'},
+            {'conclusion': 'failure'},
+            {'conclusion': 'skipped'},
+            {'head_branch': 'feature/untrusted'},
+            {'head_branch': ''},
+        ):
+            mutated = deepcopy(canonical)
+            mutated.update(bad)
+            assert not allowed(mutated), (
+                f'forged {name} source passed canonical privileged filter: {bad}'
+            )
+
+
 def check_workflow_boundary() -> None:
     assert 'ref: ${{ github.event.repository.default_branch }}' in WORKFLOW
     assert 'persist-credentials: false' in WORKFLOW
@@ -637,7 +689,7 @@ CHECKS=[
     check_config,check_parsers,check_metadata,check_classification,check_provenance,
     check_spoofing,check_go_patch,check_grpc_security_patch,check_go_refusal,check_current_go_override_update,
     check_owner_identity_review_and_refresh,check_action_patch,check_action_refusal,check_docker_semantics,check_run_identity,check_qualification,
-    check_targets,check_workflow_boundary,
+    check_targets,check_authenticated_workflow_run_filter,check_workflow_boundary,
 ]
 if __name__ == '__main__':
     for check in CHECKS: check()
