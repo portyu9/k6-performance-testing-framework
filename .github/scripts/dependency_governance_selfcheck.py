@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import io
 import json
 import re
 import subprocess
+import urllib.error
+from unittest.mock import patch
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -11,6 +14,7 @@ from typing import Any
 
 import dependency_governance as gov
 from dependency_governance_lib.models import Assessment, GovernanceError
+from dependency_governance_lib.github import GitHubApi
 from dependency_governance_lib.qualification import validate_qualification
 from dependency_governance_lib.reconcile import (
     ensure_owner_review_and_approval,
@@ -558,6 +562,77 @@ def check_docker_semantics() -> None:
     )
     assert not mixed['eligible']
 
+def check_safe_github_get_retries() -> None:
+    api = GitHubApi('fixture-token', REPO, 2)
+
+    def error(status: int) -> urllib.error.HTTPError:
+        return urllib.error.HTTPError(
+            'https://api.github.com/user', status, 'fixture', {},
+            io.BytesIO(b'fixture server response'),
+        )
+
+    for status in (500, 502, 503, 504):
+        with (
+            patch(
+                'dependency_governance_lib.github.urllib.request.urlopen',
+                side_effect=[error(status), io.BytesIO(b'{"login":"fixture-owner"}')],
+            ) as urlopen,
+            patch('dependency_governance_lib.github.time.sleep') as sleep,
+        ):
+            assert api.get('https://api.github.com/user') == {'login': 'fixture-owner'}
+            assert urlopen.call_count == 2
+            assert sleep.call_count == 1 and sleep.call_args.args[0] == 0.25
+            for call in urlopen.call_args_list:
+                request = call.args[0]
+                assert request.get_method() == 'GET'
+                assert request.get_header('Authorization') == 'Bearer fixture-token'
+
+    with (
+        patch(
+            'dependency_governance_lib.github.urllib.request.urlopen',
+            side_effect=[error(500) for _ in range(3)],
+        ) as urlopen,
+        patch('dependency_governance_lib.github.time.sleep') as sleep,
+    ):
+        try:
+            api.get('/pulls/17')
+        except GovernanceError as exc:
+            assert 'failed (500)' in str(exc)
+        else:
+            raise AssertionError('exhausted transient GET must fail closed')
+        assert urlopen.call_count == 3
+        assert [call.args[0] for call in sleep.call_args_list] == [0.25, 0.5]
+
+    for status in (400, 401, 403, 404, 409, 422, 429):
+        with (
+            patch('dependency_governance_lib.github.urllib.request.urlopen', side_effect=error(status)) as urlopen,
+            patch('dependency_governance_lib.github.time.sleep') as sleep,
+        ):
+            try:
+                api.get('/pulls/17')
+            except GovernanceError as exc:
+                assert f'failed ({status})' in str(exc)
+            else:
+                raise AssertionError(f'HTTP {status} must fail closed')
+            assert urlopen.call_count == 1
+            sleep.assert_not_called()
+
+    for method in ('POST', 'PATCH', 'PUT'):
+        with (
+            patch('dependency_governance_lib.github.urllib.request.urlopen', side_effect=error(500)) as urlopen,
+            patch('dependency_governance_lib.github.time.sleep') as sleep,
+        ):
+            try:
+                api.request(method, '/pulls/17', {'event': 'APPROVE'})
+            except GovernanceError:
+                pass
+            else:
+                raise AssertionError(f'HTTP 500 {method} must not replay')
+            assert urlopen.call_count == 1
+            assert urlopen.call_args.args[0].get_method() == method
+            sleep.assert_not_called()
+
+
 def check_run_identity() -> None:
     expected=CONFIG['requiredWorkflows'][0]; p=pull()
     run={'name':'ci','path':'.github/workflows/ci.yml','event':'pull_request','head_sha':HEAD,'head_branch':p['head']['ref'],'status':'completed','conclusion':'success','pull_requests':[{'number':17,'base':{'sha':BASE}}]}
@@ -690,7 +765,7 @@ CHECKS=[
     check_config,check_parsers,check_metadata,check_classification,check_provenance,
     check_spoofing,check_go_patch,check_grpc_security_patch,check_go_refusal,check_current_go_override_update,
     check_owner_identity_review_and_refresh,check_action_patch,check_action_refusal,check_docker_semantics,check_run_identity,check_qualification,
-    check_targets,check_authenticated_workflow_run_filter,check_workflow_boundary,
+    check_targets,check_safe_github_get_retries,check_authenticated_workflow_run_filter,check_workflow_boundary,
 ]
 if __name__ == '__main__':
     for check in CHECKS: check()
