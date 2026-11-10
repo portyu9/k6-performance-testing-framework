@@ -3,12 +3,17 @@ from __future__ import annotations
 import base64
 import json
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
 
 from .models import GovernanceError, PAGE_SIZE
+
+TRANSIENT_GET_ATTEMPTS = 3
+TRANSIENT_GET_DELAY_SECONDS = 0.25
+TRANSIENT_GET_STATUSES = frozenset({500, 502, 503, 504})
 
 class GitHubApi:
     def __init__(self, token: str, repository: str, max_pagination_pages: int):
@@ -36,16 +41,27 @@ class GitHubApi:
                 **({"Content-Type": "application/json"} if payload is not None else {}),
             },
         )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                raw = response.read()
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")[:1000]
-            raise GovernanceError(
-                f"GitHub API {method} {url} failed ({exc.code}): {detail}"
-            ) from exc
-        except OSError as exc:
-            raise GovernanceError(f"GitHub API {method} {url} failed: {exc}") from exc
+        # Retry only authenticated GET. Writes may already have succeeded
+        # remotely and must never be replayed by this controller.
+        for attempt in range(TRANSIENT_GET_ATTEMPTS):
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    raw = response.read()
+                break
+            except urllib.error.HTTPError as exc:
+                detail = exc.read(1000).decode("utf-8", "replace")
+                if (
+                    method == "GET"
+                    and exc.code in TRANSIENT_GET_STATUSES
+                    and attempt + 1 < TRANSIENT_GET_ATTEMPTS
+                ):
+                    time.sleep(TRANSIENT_GET_DELAY_SECONDS * (attempt + 1))
+                    continue
+                raise GovernanceError(
+                    f"GitHub API {method} {url} failed ({exc.code}): {detail}"
+                ) from exc
+            except OSError as exc:
+                raise GovernanceError(f"GitHub API {method} {url} failed: {exc}") from exc
         if not raw:
             return None
         try:
