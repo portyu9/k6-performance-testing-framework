@@ -488,13 +488,12 @@ def validate_docker(
         ]
         if (
             len(k6_changes) != 1
-            or len(changes) != 1
             or len(removed_version) != 1
             or len(added_version) != 1
             or len(removed_commit) != 1
             or len(added_commit) != 1
         ):
-            reasons.append("k6 source repair must pair one marker update with exactly two source-pin replacements")
+            reasons.append("k6 source repair must pair exactly one k6 release-marker update with two source-pin replacements")
         else:
             k6_change = k6_changes[0]
             if removed_version[0].group("value") != k6_change["fromTag"]:
