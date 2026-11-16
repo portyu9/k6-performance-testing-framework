@@ -4,7 +4,7 @@ ARG K6_COMMIT=e0887846143ab176d4b5483c9d52cf3b3e009f1a
 # Release marker retained so Dependabot continues to surface upstream k6 image
 # updates. The runtime binary is rebuilt below so security-qualified Go module
 # overrides can be applied without losing exact upstream release provenance.
-FROM grafana/k6:2.3.0@sha256:2dd4756ec6e14e62778916e1eb850108e4b499304c02df56760fa0bdb0fba0b8 AS upstream-release
+FROM grafana/k6:2.4.0@sha256:d41bb79cd8de5a7ad619b53570e3712633e8bff0937010a5c6c57a4747e7a276 AS upstream-release
 
 FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.24@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18 AS builder
 ARG K6_VERSION
@@ -45,7 +45,7 @@ RUN awk ' \
     && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
        go build -trimpath -o /out/k6
 
-FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS runtime
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS runtime
 ARG K6_VERSION
 ARG K6_COMMIT
 
