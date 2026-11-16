@@ -784,7 +784,7 @@ def check_workflow_boundary() -> None:
         "Reconcile dependency governance",
     ):
         assert (
-            f"- name: {protected_step}\\n        if: steps.current_main.outputs.trusted == 'true'"
+            f"- name: {protected_step}\n        if: steps.current_main.outputs.trusted == 'true'"
             in WORKFLOW
         )
     assert "if: steps.current_main.outputs.trusted == 'true' && (github.event_name == 'workflow_run'" in WORKFLOW
