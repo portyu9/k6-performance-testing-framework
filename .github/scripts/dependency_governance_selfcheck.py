@@ -769,7 +769,25 @@ def check_workflow_boundary() -> None:
     assert "github.ref == 'refs/heads/main'" in WORKFLOW
     assert "cron: '7,17,27,37,47,57 * * * *'" in WORKFLOW
     assert 'Authenticate exact-current-main privileged wake' in WORKFLOW
-    assert 'test "$live_main" = "$GITHUB_SHA"' in WORKFLOW
+    # A stale, still-authenticated workflow wake must be a no-op, never a
+    # privileged reconciliation and never a misleading failure.
+    assert 'if [[ "$live_main" != "$GITHUB_SHA" ]]; then' in WORKFLOW
+    assert 'echo "trusted=false" >> "$GITHUB_OUTPUT"' in WORKFLOW
+    assert 'echo "trusted=true" >> "$GITHUB_OUTPUT"' in WORKFLOW
+    assert WORKFLOW.index('echo "trusted=false" >> "$GITHUB_OUTPUT"') < WORKFLOW.index('exit 0')
+    assert WORKFLOW.index('echo "trusted=true" >> "$GITHUB_OUTPUT"') < WORKFLOW.index('Checkout trusted default-branch governance code only')
+    assert WORKFLOW.count("if: steps.current_main.outputs.trusted == 'true'") == 6
+    for protected_step in (
+        "Checkout trusted default-branch governance code only",
+        "Set up Python",
+        "Validate trusted governance and recovery configuration",
+        "Reconcile dependency governance",
+    ):
+        assert (
+            f"- name: {protected_step}\n        if: steps.current_main.outputs.trusted == 'true'"
+            in WORKFLOW
+        )
+    assert "if: steps.current_main.outputs.trusted == 'true' && (github.event_name == 'workflow_run'" in WORKFLOW
     assert 'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}"' in WORKFLOW
     assert 'github.event.workflow_run.conclusion == \'success\'' in WORKFLOW
     assert 'github.event.workflow_run.head_repository.full_name == github.repository' in WORKFLOW
@@ -779,7 +797,7 @@ def check_workflow_boundary() -> None:
     assert "- '.github/scripts/dependency_repair.py'" in WORKFLOW
     assert "cron: '7,17,27,37,47,57 * * * *'" in WORKFLOW
     assert 'Apply deterministic dependency repair' in WORKFLOW
-    assert "if: github.event_name != 'push'" in WORKFLOW
+    assert "if: steps.current_main.outputs.trusted == 'true' && github.event_name != 'push'" in WORKFLOW
     assert "github.event_name == 'push' || inputs['allow-merge']" in WORKFLOW
     owner_secret = 'DEPENDABOT_OWNER_TOKEN: ${{ secrets.DEPENDABOT_OWNER_TOKEN }}'
     assert WORKFLOW.count(owner_secret) == 2
