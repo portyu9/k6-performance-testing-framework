@@ -37,7 +37,7 @@ jobs:
       - name: Prepare evidence directory
         run: mkdir -p reports
       - name: Build tracked k6 image
-        run: docker build -f docker/Dockerfile -t qa-k6:extended .
+        run: python3 scripts/retry_docker_build.py qa-k6:extended
       - name: Reject invalid soak configuration without traffic
         if: matrix.profile == 'soak'
         shell: bash
