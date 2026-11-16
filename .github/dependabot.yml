@@ -10,8 +10,13 @@ updates:
       timezone: "America/New_York"
     open-pull-requests-limit: 10
     groups:
+      # Keep source-provenance repair separate from independently safe runtime updates.
+      k6-release:
+        patterns: ["grafana/k6"]
+        update-types: ["minor", "patch"]
       routine-dependencies:
         patterns: ["*"]
+        exclude-patterns: ["grafana/k6"]
         update-types: ["minor", "patch"]
     commit-message:
       prefix: "deps"
