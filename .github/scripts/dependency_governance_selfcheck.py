@@ -551,9 +551,9 @@ def check_docker_semantics() -> None:
     assert {change['dependency'] for change in grouped['changes']} == {'grafana/k6', 'alpine'}
     repaired_patch = (
         grouped_patch
-        + '-ARG K6_VERSION=2.3.0\\n+ARG K6_VERSION=2.4.0\\n'
-        + '-ARG K6_COMMIT=' + '1' * 40 + '\\n'
-        + '+ARG K6_COMMIT=' + '2' * 40 + '\\n'
+        + '-ARG K6_VERSION=2.3.0\n+ARG K6_VERSION=2.4.0\n'
+        + '-ARG K6_COMMIT=' + '1' * 40 + '\n'
+        + '+ARG K6_COMMIT=' + '2' * 40 + '\n'
     )
     repaired = gov.validate_docker(
         [{'filename': 'docker/Dockerfile', 'patch': repaired_patch}], grouped_metadata, CONFIG)
