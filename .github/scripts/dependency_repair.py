@@ -20,6 +20,18 @@ K6_VERSION_LINE = re.compile(r"(?m)^ARG K6_VERSION=([0-9]+\.[0-9]+\.[0-9]+)$")
 K6_COMMIT_LINE = re.compile(r"(?m)^ARG K6_COMMIT=([0-9a-f]{40})$")
 
 
+def select_k6_release_change(changes: list[dict[str, str]]) -> dict[str, str] | None:
+    """A grouped Docker PR may advance other validated images alongside k6."""
+    markers = [
+        change for change in changes
+        if change.get("dependency") == "grafana/k6"
+        and change.get("fromTag") != change.get("toTag")
+    ]
+    if len(markers) > 1:
+        raise GovernanceError("k6 source repair requires exactly one release-marker update")
+    return markers[0] if markers else None
+
+
 def synchronize_dockerfile(
     text: str, *, old_version: str, new_version: str, new_commit: str
 ) -> str:
@@ -205,18 +217,9 @@ def repair_pull(
         }
 
     changes = semantic.get("changes") or []
-    k6_changes = [
-        change
-        for change in changes
-        if change.get("dependency") == "grafana/k6"
-        and change.get("fromTag") != change.get("toTag")
-    ]
-    if not k6_changes:
+    change = select_k6_release_change(changes)
+    if change is None:
         return {"pr": safe_number, "skipped": True, "reason": "no k6 release-marker repair required"}
-    if len(changes) != 1 or len(k6_changes) != 1:
-        raise GovernanceError("k6 source repair requires a single-dependency marker update")
-
-    change = k6_changes[0]
     old_version = str(change["fromTag"])
     new_version = str(change["toTag"])
     current_text = api.file_at("docker/Dockerfile", source_head)

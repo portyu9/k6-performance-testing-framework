@@ -5,7 +5,7 @@ import unittest
 
 from dependency_governance_lib.models import GovernanceError
 from dependency_governance_lib.provenance import REPAIR_MESSAGE
-from dependency_repair import _verify_repair_publisher, synchronize_dockerfile
+from dependency_repair import _verify_repair_publisher, select_k6_release_change, synchronize_dockerfile
 
 OLD_COMMIT = "1" * 40
 NEW_COMMIT = "2" * 40
@@ -38,6 +38,16 @@ class DependencyRepairSelfCheck(unittest.TestCase):
         for publisher in (None, PublisherApi("github-actions[bot]", 41898282)):
             with self.assertRaises(GovernanceError):
                 _verify_repair_publisher(publisher, config)
+
+    def test_grouped_docker_update_selects_k6_without_discarding_other_images(self) -> None:
+        changes = [
+            {"dependency": "grafana/k6", "fromTag": "2.3.0", "toTag": "2.4.0"},
+            {"dependency": "alpine", "fromTag": "3.24.3", "toTag": "3.24.4"},
+        ]
+        self.assertEqual(select_k6_release_change(changes), changes[0])
+        self.assertIsNone(select_k6_release_change(changes[1:]))
+        with self.assertRaises(GovernanceError):
+            select_k6_release_change([changes[0], changes[0]])
 
     def test_source_provenance_is_updated_exactly(self) -> None:
         repaired = synchronize_dockerfile(

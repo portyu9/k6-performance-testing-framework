@@ -531,6 +531,40 @@ def check_docker_semantics() -> None:
         CONFIG,
     )
     assert minor['eligible'], minor['reasons']
+    # Regression: Dependabot legitimately groups the k6 marker with an Alpine
+    # update. The trusted source-pin repair must not reject or drop Alpine.
+    grouped_patch = (
+        docker_patch(image='grafana/k6', old_tag='2.3.0', new_tag='2.4.0',
+                     platform='', alias='upstream-release')
+        + docker_patch(image='alpine', old_tag='3.24.3', new_tag='3.24.4',
+                       platform='', alias='runtime')
+    )
+    grouped_metadata = [
+        {'name': 'grafana/k6', 'version': '2.4.0', 'dependencyType': 'direct:production',
+         'updateType': 'version-update:semver-minor'},
+        {'name': 'alpine', 'version': '3.24.4', 'dependencyType': 'direct:production',
+         'updateType': 'version-update:semver-patch'},
+    ]
+    grouped = gov.validate_docker(
+        [{'filename': 'docker/Dockerfile', 'patch': grouped_patch}], grouped_metadata, CONFIG)
+    assert grouped['eligible'], grouped['reasons']
+    assert {change['dependency'] for change in grouped['changes']} == {'grafana/k6', 'alpine'}
+    repaired_patch = (
+        grouped_patch
+        + '-ARG K6_VERSION=2.3.0\n+ARG K6_VERSION=2.4.0\n'
+        + '-ARG K6_COMMIT=' + '1' * 40 + '\n'
+        + '+ARG K6_COMMIT=' + '2' * 40 + '\n'
+    )
+    repaired = gov.validate_docker(
+        [{'filename': 'docker/Dockerfile', 'patch': repaired_patch}], grouped_metadata, CONFIG)
+    assert repaired['eligible'], repaired['reasons']
+    assert repaired['sourceRepair'] is True
+    duplicate_k6 = gov.validate_docker(
+        [{'filename': 'docker/Dockerfile', 'patch': repaired_patch +
+          docker_patch(image='grafana/k6', old_tag='2.3.0', new_tag='2.4.0',
+                       platform='', alias='upstream-release')}], grouped_metadata, CONFIG)
+    assert not duplicate_k6['eligible']
+
     # A new known-in-base image identity must not need an arbitrary configured list.
     other = gov.validate_docker(
         [{'filename': 'docker/Dockerfile', 'patch': docker_patch(
