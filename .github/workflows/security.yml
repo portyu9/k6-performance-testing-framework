@@ -207,7 +207,7 @@ jobs:
       - name: Prepare evidence directory
         run: mkdir -p reports/security/image
       - name: Build tracked k6 image
-        run: docker build -f docker/Dockerfile -t qa-k6:security .
+        run: python3 scripts/retry_docker_build.py qa-k6:security
       - name: Scan built k6 image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

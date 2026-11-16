@@ -31,6 +31,8 @@ jobs:
         run: bash scripts/test_guardrails.sh
       - name: Validate local fixture syntax
         run: node --check scripts/local-api.js
+      - name: Verify bounded Go module transport recovery contract
+        run: python3 scripts/retry_docker_build_selfcheck.py
       - name: Build tracked k6 image and validate non-traffic default
         shell: bash
         run: |
@@ -47,7 +49,7 @@ jobs:
             exit 1
           fi
 
-          docker build -f docker/Dockerfile -t qa-k6:ci .
+          python3 scripts/retry_docker_build.py qa-k6:ci
           docker run --rm qa-k6:ci | grep -F "k6 v${expected_version}"
       - name: Validate k6 runtime refusal contract without sending traffic
         run: |
@@ -161,7 +163,7 @@ jobs:
           rm -f reports/summary.txt reports/summary.json
           chmod a+rwx reports
       - name: Build tracked k6 image
-        run: docker build -f docker/Dockerfile -t qa-k6:smoke .
+        run: python3 scripts/retry_docker_build.py qa-k6:smoke
       - name: Run pinned k6 smoke gate against repository-owned fixture
         shell: bash
         run: |
