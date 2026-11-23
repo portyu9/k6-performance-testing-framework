@@ -36,11 +36,12 @@ def target_pull_requests(
         run = event.get("workflow_run") or {}
         if run.get("event") != "pull_request":
             return []
-        pulls = run.get("pull_requests") or []
-        if len(pulls) != 1:
-            return []
-        return [parse_positive_integer(pulls[0].get("number"), "workflow_run PR number")]
-    if event_name in {"push", "schedule"}:
+        # The protected workflow has already verified the live successful
+        # same-repository Dependabot run on exact accepted main. Treat it only
+        # as a trusted wake: its embedded PR array is neither an authorization
+        # list nor complete inventory. Reconcile every open signed bot PR,
+        # each with its own independent provenance/CI/security gates.
+    if event_name in {"workflow_run", "push", "schedule"}:
         pulls = api.paginate(f"/pulls?state=open&base={urllib.parse.quote(config['baseBranch'], safe='')}")
         return [
             int(pull["number"])
