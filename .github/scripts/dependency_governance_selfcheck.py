@@ -699,6 +699,14 @@ def check_targets() -> None:
     api=FakeApi(pulls=[{'number':1,'user':{'login':'dependabot[bot]'}},{'number':2,'user':{'login':'human'}},{'number':3,'user':{'login':'dependabot[bot]'}}])
     assert gov.target_pull_requests(api,'schedule',{},CONFIG) == [1,3]
     assert gov.target_pull_requests(api,'push',{},CONFIG) == [1,3]
+    # A trusted completed bot check must reconcile siblings, even when GitHub
+    # omits PR backlinks from the workflow_run payload (GitHub sometimes does).
+    wake={'workflow_run':{'event':'pull_request','pull_requests':[{'number':1}]}}
+    assert gov.target_pull_requests(api,'workflow_run',wake,CONFIG) == [1,3]
+    empty={'workflow_run':{'event':'pull_request','pull_requests':[]}}
+    assert gov.target_pull_requests(api,'workflow_run',empty,CONFIG) == [1,3]
+    unrelated={'workflow_run':{'event':'workflow_dispatch','pull_requests':[{'number':1}]}}
+    assert gov.target_pull_requests(api,'workflow_run',unrelated,CONFIG) == []
     assert gov.target_pull_requests(api,'workflow_dispatch',{'inputs':{'pr-number':'7'}},CONFIG) == [7]
     try: gov.target_pull_requests(api,'workflow_dispatch',{'inputs':{'pr-number':'7x'}},CONFIG)
     except gov.GovernanceError: pass
