@@ -15,6 +15,7 @@ from typing import Any
 import dependency_governance as gov
 from dependency_governance_lib.models import Assessment, GovernanceError
 from dependency_governance_lib.github import GitHubApi
+from dependency_governance_lib.runner import verify_scheduled_owner_readiness
 from dependency_governance_lib.qualification import validate_qualification
 from dependency_governance_lib.reconcile import (
     ensure_owner_review_and_approval,
@@ -821,11 +822,38 @@ def check_workflow_boundary() -> None:
     assert "group: dependency-governance-${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || 'reconcile' }}" in WORKFLOW
 
 
+
+def check_scheduled_owner_credential_readiness() -> None:
+    good = OwnerApi(CONFIG["ownerApprovalLogin"], CONFIG["ownerApprovalUserId"])
+    assert verify_scheduled_owner_readiness("schedule", good, CONFIG) == {
+        "checked": True, "identity": "verified",
+    }
+    bad = OwnerApi(CONFIG["ownerApprovalLogin"], CONFIG["ownerApprovalUserId"] + 1)
+    for api, marker in ((None, "DEPENDABOT_OWNER_TOKEN is required"),
+                        (bad, "configured repository owner identity")):
+        try:
+            verify_scheduled_owner_readiness("schedule", api, CONFIG)
+        except GovernanceError as exc:
+            assert marker in str(exc)
+        else:
+            raise AssertionError("idle owner token preflight accepted missing/wrong account")
+    with patch.object(good, "get", side_effect=GovernanceError("expired owner token")):
+        try:
+            verify_scheduled_owner_readiness("schedule", good, CONFIG)
+        except GovernanceError as exc:
+            assert "expired owner token" in str(exc)
+        else:
+            raise AssertionError("expired K6 owner token was considered healthy")
+    for name in ("push", "workflow_run", "workflow_dispatch", "pull_request"):
+        assert verify_scheduled_owner_readiness(name, None, CONFIG) == {"checked": False}
+
+
 CHECKS=[
     check_config,check_parsers,check_metadata,check_classification,check_provenance,
     check_spoofing,check_go_patch,check_grpc_security_patch,check_go_refusal,check_current_go_override_update,
     check_owner_identity_review_and_refresh,check_action_patch,check_action_refusal,check_docker_semantics,check_run_identity,check_qualification,
     check_targets,check_safe_github_get_retries,check_authenticated_workflow_run_filter,check_workflow_boundary,
+    check_scheduled_owner_credential_readiness,
 ]
 if __name__ == '__main__':
     for check in CHECKS: check()
