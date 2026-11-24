@@ -11,7 +11,7 @@ from typing import Any
 from .github import GitHubApi
 from .models import GovernanceError, load_config, parse_bool, parse_positive_integer, unique
 from .qualification import fetch_assessment
-from .reconcile import reconcile_one, render_status, upsert_status_comment
+from .reconcile import reconcile_one, render_status, upsert_status_comment, verify_owner_identity
 
 def load_event() -> dict[str, Any]:
     path = os.environ.get("GITHUB_EVENT_PATH", "").strip()
@@ -63,6 +63,16 @@ def write_step_summary(lines: list[str]) -> None:
         raise GovernanceError(f"unable to write step summary: {exc}") from exc
 
 
+def verify_scheduled_owner_readiness(
+    event_name: str, owner_api: GitHubApi | None, config: dict[str, Any]
+) -> dict[str, Any]:
+    """Scheduled empty dependency queues require live exact-owner authentication."""
+    if event_name != "schedule":
+        return {"checked": False}
+    verify_owner_identity(owner_api, config)
+    return {"checked": True, "identity": "verified"}
+
+
 def run_governance(config: dict[str, Any]) -> int:
     repository = os.environ.get("GITHUB_REPOSITORY", "").strip()
     api = GitHubApi(
@@ -81,10 +91,12 @@ def run_governance(config: dict[str, Any]) -> int:
         raise GovernanceError("GITHUB_EVENT_NAME is required")
     event = load_event()
     allow_merge = parse_bool(os.environ.get("ALLOW_MERGE", "false"), "ALLOW_MERGE")
+    owner_readiness = verify_scheduled_owner_readiness(event_name, owner_api, config)
     targets = unique([str(number) for number in target_pull_requests(api, event_name, event, config)])
     if not targets:
         write_step_summary(["## Dependency governance", "", "No Dependabot pull requests required reconciliation."])
         print("no Dependabot pull requests required reconciliation")
+        print(json.dumps({"reconciled": 0, "ownerReadiness": owner_readiness}, sort_keys=True))
         return 0
 
     results: list[str] = []
@@ -113,6 +125,7 @@ def run_governance(config: dict[str, Any]) -> int:
     write_step_summary(["## Dependency governance", "", *[f"- {result}" for result in results]])
     for result in results:
         print(result)
+    print(json.dumps({"reconciled": len(results), "ownerReadiness": owner_readiness}, sort_keys=True))
     if operational_errors:
         raise GovernanceError(
             f"{len(operational_errors)} reconciliation(s) failed operationally; later PRs were still evaluated"
